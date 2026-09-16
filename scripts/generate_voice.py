@@ -59,21 +59,13 @@ def run(command: list[str]):
 def light_diacritics(text: str) -> str:
     """تشكيل انتقائي للكلمات التي قد يخطئ Edge TTS في نطقها."""
     text = re.sub(r"\s+", " ", text).strip()
+    # تشكيل محدود جداً فقط عند احتمال التباس النطق.
     replacements = [
         ("إن الله", "إِنَّ اللّٰه"),
         ("أن الله", "أَنَّ اللّٰه"),
-        ("إنك", "إِنَّكَ"),
-        ("إنكِ", "إِنَّكِ"),
         ("الله", "اللّٰه"),
-        ("لكن", "لٰكِن"),
-        ("لأن", "لِأَنَّ"),
-        ("ألا", "أَلَا"),
-        ("يا رب", "يَا رَبّ"),
         ("اطمئن", "اِطْمَئِنّ"),
         ("اطمئني", "اِطْمَئِنِّي"),
-        ("مطمئن", "مُطْمَئِنّ"),
-        ("حقا", "حَقًّا"),
-        ("حقًا", "حَقًّا"),
     ]
     for old, new in replacements:
         text = text.replace(old, new)
@@ -193,6 +185,11 @@ def main():
         sys.exit("❌ حقل narration غير موجود أو فارغ.")
 
     narration = light_diacritics(narration)
+    ending = "وهنا تنتهي القصة... لكن هل كنت ستفتح الباب لو كنت مكانه؟"
+    if not narration.endswith((".", "؟", "!", "…")):
+        narration += "."
+    if ending not in narration:
+        narration = f"{narration} {ending}"
     episode["narration"] = narration
     EPISODE_PATH.write_text(
         json.dumps(episode, ensure_ascii=False, indent=2),
