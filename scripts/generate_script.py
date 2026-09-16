@@ -46,7 +46,7 @@ def generate_episode() -> dict:
         )
 
     completion = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",  # موديل مجاني قوي على Groq
+        model="openai/gpt-oss-120b",  # موديل مجاني قوي على Groq (بديل llama-3.3 بعد إيقافه)
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message},
