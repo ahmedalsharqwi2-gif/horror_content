@@ -4,6 +4,17 @@ fetch_clips.py
 ويتجنب أي كليب اتستخدم قبل كده باستخدام state/used_clips.json.
 
 يحتاج: متغير بيئة PEXELS_API_KEY (مجاني من https://www.pexels.com/api/)
+
+تعديلات على النسخة دي:
+- بدل ما ينزّل كليب واحد بس لكل كلمة بحث، بقى بينزّل لحد CLIPS_PER_KEYWORD
+  كليبات لكل كلمة (بدل ما كانت CLIPS_PER_KEYWORD معرّفة بس مش مستخدمة فعليًا)،
+  عشان يبقى فيه أكبر عدد ممكن من الفيديوهات المتنوعة اللي فعلاً بتعبّر عن
+  أحداث القصة، بدل الاعتماد على كليب واحد يتكرر أو يتمط طول الحلقة.
+- بيدور على صفحات أكتر (MAX_PAGES_TO_TRY) وبنتائج أكتر لكل صفحة (per_page)
+  عشان يقدر يلاقي عدد كافي من الكليبات الجديدة (الغير مستخدمة قبل كده)
+  لكل كلمة بحث.
+- فيه سقف إجمالي (MAX_TOTAL_CLIPS) يمنع تنزيل عدد ضخم جدًا من الكليبات في
+  حلقة واحدة (تحكم في الوقت والمساحة)، قابل للتعديل براحتك.
 """
 import os
 import json
@@ -18,9 +29,18 @@ USED_CLIPS_PATH = STATE_DIR / "used_clips.json"
 CLIPS_DIR = SCRIPT_DIR.parent / "downloaded_clips"
 
 PEXELS_SEARCH_URL = "https://api.pexels.com/videos/search"
-MAX_PAGES_TO_TRY = 3       # لو أول صفحة كلها مكررة، جرّب صفحات تانية
-CLIPS_PER_KEYWORD = 1
-MIN_DURATION_SECONDS = 4   # نتجنب الكليبات القصيرة جدًا
+
+MAX_PAGES_TO_TRY = 5        # زودناها عشان نقدر نلاقي كليبات جديدة كفاية لكل كلمة
+RESULTS_PER_PAGE = 15       # زودناها عشان كل صفحة تجيب نتائج أكتر
+
+# أقصى عدد كليبات نحاول نجيبه لكل كلمة بحث (بدل كليب واحد بس زي الأول).
+CLIPS_PER_KEYWORD = 4
+
+# سقف إجمالي لعدد الكليبات في الحلقة الواحدة، عشان التنزيل ميطولش أو
+# ياكل مساحة/رصيد API أكتر من اللازم. غيّره براحتك.
+MAX_TOTAL_CLIPS = 40
+
+MIN_DURATION_SECONDS = 4    # نتجنب الكليبات القصيرة جدًا
 
 
 def load_json(path: Path, default):
@@ -29,22 +49,34 @@ def load_json(path: Path, default):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def search_pexels(keyword: str, api_key: str, used_ids: set) -> dict | None:
+def search_pexels(keyword: str, api_key: str, used_ids: set, count: int) -> list[dict]:
+    """يرجّع لحد `count` كليبات جديدة (مش مستخدمة قبل كده) لكلمة البحث دي."""
     headers = {"Authorization": api_key}
+    found: list[dict] = []
+    seen_ids_this_search: set[int] = set()
 
     for page in range(1, MAX_PAGES_TO_TRY + 1):
+        if len(found) >= count:
+            break
+
         params = {
             "query": keyword,
             "orientation": "portrait",  # مناسب للشورتس 9:16
-            "per_page": 10,
+            "per_page": RESULTS_PER_PAGE,
             "page": page,
         }
         resp = requests.get(PEXELS_SEARCH_URL, headers=headers, params=params, timeout=20)
         resp.raise_for_status()
         data = resp.json()
 
-        for video in data.get("videos", []):
-            if video["id"] in used_ids:
+        videos = data.get("videos", [])
+        if not videos:
+            break  # مفيش نتائج تانية عن الكلمة دي
+
+        for video in videos:
+            if len(found) >= count:
+                break
+            if video["id"] in used_ids or video["id"] in seen_ids_this_search:
                 continue
             if video["duration"] < MIN_DURATION_SECONDS:
                 continue
@@ -58,14 +90,15 @@ def search_pexels(keyword: str, api_key: str, used_ids: set) -> dict | None:
             hd_files = [f for f in video_files if 720 <= f.get("height", 0) <= 1080]
             chosen_file = hd_files[0] if hd_files else video_files[0]
 
-            return {
+            found.append({
                 "id": video["id"],
                 "url": chosen_file["link"],
                 "keyword": keyword,
                 "duration": video["duration"],
-            }
+            })
+            seen_ids_this_search.add(video["id"])
 
-    return None  # مفيش نتيجة جديدة بعد كل المحاولات
+    return found
 
 
 def download_clip(url: str, dest: Path):
@@ -91,22 +124,30 @@ def main():
     CLIPS_DIR.mkdir(parents=True, exist_ok=True)
     fetched_clips = []
 
-    for i, keyword in enumerate(episode["visual_keywords"]):
-        result = search_pexels(keyword, api_key, used_ids)
-        if result is None:
-            print(f"⚠️  مفيش كليب جديد لكلمة '{keyword}' — هنتخطاها")
+    for keyword in episode["visual_keywords"]:
+        if len(fetched_clips) >= MAX_TOTAL_CLIPS:
+            print(f"ℹ️ وصلنا للسقف الأقصى ({MAX_TOTAL_CLIPS} كليب) — هنوقف هنا.")
+            break
+
+        remaining_budget = MAX_TOTAL_CLIPS - len(fetched_clips)
+        wanted = min(CLIPS_PER_KEYWORD, remaining_budget)
+
+        results = search_pexels(keyword, api_key, used_ids, wanted)
+        if not results:
+            print(f"⚠️  مفيش كليبات جديدة لكلمة '{keyword}' — هنتخطاها")
             continue
 
-        dest_path = CLIPS_DIR / f"clip_{i:02d}.mp4"
-        download_clip(result["url"], dest_path)
-        used_ids.add(result["id"])
+        for result in results:
+            dest_path = CLIPS_DIR / f"clip_{len(fetched_clips):02d}.mp4"
+            download_clip(result["url"], dest_path)
+            used_ids.add(result["id"])
 
-        fetched_clips.append({
-            "file": str(dest_path),
-            "pexels_id": result["id"],
-            "keyword": keyword,
-        })
-        print(f"✅ اتنزل كليب لـ '{keyword}' (Pexels ID: {result['id']})")
+            fetched_clips.append({
+                "file": str(dest_path),
+                "pexels_id": result["id"],
+                "keyword": keyword,
+            })
+            print(f"✅ اتنزل كليب لـ '{keyword}' (Pexels ID: {result['id']})")
 
     if not fetched_clips:
         sys.exit("خطأ: مفيش ولا كليب واحد اتنزل — راجع الكلمات المفتاحية أو رصيد الـ API")
