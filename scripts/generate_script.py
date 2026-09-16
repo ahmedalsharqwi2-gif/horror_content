@@ -43,19 +43,18 @@ def generate_episode() -> dict:
         user_message += (
             "\n\nالعناوين اللي اتستخدمت قبل كده (تجنب أي تشابه معاها):\n- "
             + "\n- ".join(recent_titles)
-        )
-
-    completion = client.chat.completions.create(
+            )
+            completion = client.chat.completions.create(
         model="openai/gpt-oss-120b",  # موديل مجاني قوي على Groq (بديل llama-3.3 بعد إيقافه)
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message},
         ],
-        temperature=0.9,  # تنويع أعلى بين الحلقات
-        max_tokens=3000,  # القصة بقت أطول (~2.5-2.8 دقيقة قراءة) فمحتاجة مساحة أكبر
+        temperature=0.9,       # تنويع أعلى بين الحلقات
+        max_tokens=8000,       # زودناها عشان القصة الطويلة + التشكيل الكامل بياخد توكنز كتير
+        reasoning_effort="low",  # نقلل التفكير الداخلي المخفي عشان التوكنز تروح للنص الفعلي
         response_format={"type": "json_object"},
     )
-
     raw = completion.choices[0].message.content
     episode = json.loads(raw)
 
