@@ -2,26 +2,38 @@
 publish_buffer.py - نشر فيديو (أو فيديوهين لو القصة اتقسمت جزئين) إلى قنوات
 Buffer مع عنوان وهاشتاجات، مع جدولة تلقائية للجزء الثاني.
 
-=== ليه اتعدل الملف ===
+=== آخر تعديلين (إصلاح فشل فيسبوك ويوتيوب) ===
 
-1) سبب خطأ "output/final_video.mp4 is missing or empty":
-   generate_voice.py بقى يقسم القصص الطويلة جزئين، وبيكتب ملفات الصوت
-   بلاحقة (narration_with_music_part1.mp3 / _part2.mp3) بدل الاسم الثابت
-   القديم. الملف ده كان لسه بيدوّر على اسم فيديو واحد ثابت فقط.
+1) فشل فيسبوك في الجزأين:
+   Buffer بترجع "Field 'title' is not defined by type FacebookPostMetadataInput".
+   يعني metadata.facebook بتقبل بس حقل type ("reel")، مش title. كنا
+   بنبعت title جوه metadata.facebook غلط. العنوان أصلاً موجود في نص
+   البوست نفسه (build_post_text)، فمفيش داعي نكرره في الـ metadata.
+   → metadata_for() بقت ترجع {"facebook": {"type": "reel"}} بس.
 
-   ⚠️ التعديل ده بيحل جانب النشر بس، وبيديك رسالة خطأ تحدد أي جزء بالظبط
-   ناقص. لازم assemble_video.py (مش عندي نسخة منه) يطلّع فيديو لكل جزء
-   بنفس الاصطلاح: final_video.mp4 للحلقة الواحدة، أو final_video_part1.mp4
-   + final_video_part2.mp4 لو اتقسمت. ابعته لو عايزني أظبطه.
+2) Scheduled posts limit reached (10/10) — ظهر أول مرة بس في الجزء
+   المجدول، وبعدين بقى بيظهر حتى في addToQueue (الجزء الفوري) كمان.
+   ده معناه إن Buffer بتحسب أي بوست لسه ماتنشرش (فوري في الطابور أو
+   مجدول لوقت محدد) كـ "scheduled" ضد نفس الحد (10 لكل قناة). يعني
+   لو القناة فيها 10 بوستات معلّقة أصلاً، مفيش أي بوست جديد هينفع
+   يتضاف — سواء فوري أو مجدول. ده حد حساب حقيقي مش حاجة نلتف عليها
+   بالكود؛ ضفنا preflight check (count_pending_posts) بيسأل Buffer
+   قبل كل محاولة نشر "كام بوست معلّق على القناة دي؟" ولو وصل للحد
+   (CHANNEL_PENDING_LIMIT، افتراضي 10) بيتخطى المحاولة برسالة واضحة
+   بدل ما يحاول ويفشل. الحل الحقيقي: تنشر/تمسح بعض البوستات المعلّقة
+   يدويًا من Buffer Dashboard، أو تقلل معدل تشغيل الـ workflow، أو
+   ترفّع خطة Buffer.
 
-2) نشر متعدد الأجزاء: كل جزء بيترفع لوحده على GitHub Release، وبينشر
-   بعنوان/كابشن مخصص ليه (تنويه "الجزء 1/2").
+=== ليه اتعدل الملف قبل كده ===
 
-3) جدولة الجزء الثاني: الجزء الأول ينشر فورًا (زي ما كان بالظبط —
-   mode: addToQueue)، والجزء الثاني يتجدول فعليًا جوه Buffer نفسها
-   (mode: customScheduled + dueAt) بدل ما يتنشر في نفس اللحظة أو نعتمد
-   على sleep جوه الـ workflow. الافتراضي 24 ساعة، غيّرها بمتغير بيئة
-   PART2_DELAY_HOURS (6 مثلاً لو عايزها تنزل في سلوت تاني في نفس اليوم).
+- generate_voice.py بقى يقسم القصص الطويلة جزئين، وبيكتب ملفات الصوت
+  بلاحقة (narration_with_music_part1.mp3 / _part2.mp3) بدل الاسم الثابت
+  القديم.
+- كل جزء بيترفع لوحده على GitHub Release، وبينشر بعنوان/كابشن مخصص ليه
+  (تنويه "الجزء 1/2").
+- الجزء الأول ينشر فورًا (mode: addToQueue)، والجزء الثاني يتجدول فعليًا
+  جوه Buffer نفسها (mode: customScheduled + dueAt). الافتراضي 24 ساعة،
+  غيّرها بمتغير بيئة PART2_DELAY_HOURS.
 """
 
 import json
@@ -44,6 +56,38 @@ RELEASE_TAG = "media-assets"
 # كل جزء بينشر بعد اللي قبله بالمدة دي (ساعات)، مضروبة في (رقم الجزء - 1).
 # بافتراض جزئين: جزء 2 = فورًا + 24 ساعة.
 PART_DELAY_HOURS = float(os.environ.get("PART2_DELAY_HOURS", "24"))
+
+# نص الخطأ اللي Buffer بيرجعه لما حد الجدولة يخلص (10 بوستات مجدولة).
+SCHEDULE_LIMIT_MARKER = "Scheduled posts limit"
+
+# أقصى عدد بوستات "معلّقة" (queued أو scheduled، الاتنين بيتحسبوا "scheduled"
+# في نظر Buffer) مسموح بيها لكل قناة قبل ما تتوقف عن المحاولة.
+CHANNEL_PENDING_LIMIT = int(os.environ.get("CHANNEL_PENDING_LIMIT", "10"))
+# لو True (الافتراضي)، هنسأل Buffer الأول كام بوست معلّق على كل قناة قبل
+# أي محاولة نشر — بدل ما نحاول ونفشل بعد ما نكون رفعنا الفيديو بالفعل.
+ENABLE_PREFLIGHT_CHECK = os.environ.get("ENABLE_PREFLIGHT_CHECK", "true").lower() != "false"
+
+GET_ORGANIZATIONS_QUERY = """
+query GetOrganizations {
+  account { organizations { id name } }
+}
+"""
+
+# بيرجع أول 10 بوستات "scheduled" (فيها القيّم الفوري + المجدول) لقناة معيّنة.
+# مش محتاجين نعدّ أكتر من 10 أصلاً لأن ده أقصى حد Buffer بيسمح بيه.
+GET_PENDING_POSTS_QUERY = """
+query GetPendingPosts($organizationId: OrganizationId!, $channelId: ChannelId!) {
+  posts(
+    first: 10
+    input: {
+      organizationId: $organizationId
+      filter: { status: [scheduled], channelIds: [$channelId] }
+    }
+  ) {
+    edges { node { id } }
+  }
+}
+"""
 
 CHANNEL_SERVICES = {
     "6aaa8778ea19ca0bde57da16": "youtube",
@@ -166,28 +210,15 @@ def metadata_for(channel_id: str, title: str) -> dict | None:
             "isAiGenerated": True,
         }}
     if service == "facebook":
-        return {"facebook": {"type": "reel", "title": title[:255]}}
+        # FacebookPostMetadataInput بيقبل بس "type" — مفيش title هنا.
+        # العنوان موجود أصلاً جوه نص البوست (build_post_text).
+        return {"facebook": {"type": "reel"}}
     if service == "tiktok":
         return {"tiktok": {"isAiGenerated": True}}
     return None
 
 
-def create_buffer_post(
-    video_url: str, post_text: str, title: str, channel_id: str,
-    api_key: str, due_at: str | None = None,
-) -> dict:
-    variables = {
-        "text": post_text,
-        "channelId": channel_id,
-        "videoUrl": video_url,
-        "metadata": metadata_for(channel_id, title),
-    }
-    if due_at:
-        query = CREATE_POST_MUTATION_SCHEDULED
-        variables["dueAt"] = due_at
-    else:
-        query = CREATE_POST_MUTATION_QUEUE
-
+def _send_create_post(query: str, variables: dict, api_key: str) -> dict:
     response = requests.post(
         BUFFER_GRAPHQL_API,
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
@@ -204,6 +235,73 @@ def create_buffer_post(
     if not result.get("post"):
         raise RuntimeError(f"No post returned: {result}")
     return result
+
+
+def create_buffer_post(
+    video_url: str, post_text: str, title: str, channel_id: str,
+    api_key: str, due_at: str | None = None,
+) -> dict:
+    metadata = metadata_for(channel_id, title)
+
+    if due_at:
+        variables = {
+            "text": post_text, "channelId": channel_id, "videoUrl": video_url,
+            "metadata": metadata, "dueAt": due_at,
+        }
+        try:
+            return _send_create_post(CREATE_POST_MUTATION_SCHEDULED, variables, api_key)
+        except RuntimeError as error:
+            if SCHEDULE_LIMIT_MARKER not in str(error):
+                raise
+            # حد الجدولة في Buffer خلص (10 بوستات مجدولة) — بدل ما الجزء
+            # يفشل، ننشره فورًا في الطابور العادي بدل الجدولة.
+            print(f"    ⚠️ {SCHEDULE_LIMIT_MARKER} — هنشر فورًا (addToQueue) بدل الجدولة.")
+            variables = {
+                "text": post_text, "channelId": channel_id,
+                "videoUrl": video_url, "metadata": metadata,
+            }
+            return _send_create_post(CREATE_POST_MUTATION_QUEUE, variables, api_key)
+
+    variables = {
+        "text": post_text, "channelId": channel_id,
+        "videoUrl": video_url, "metadata": metadata,
+    }
+    return _send_create_post(CREATE_POST_MUTATION_QUEUE, variables, api_key)
+
+
+def get_organization_id(api_key: str) -> str:
+    """أول Organization ID متاح في الحساب — كافي هنا لأننا مش محتاجين نفرّق
+    بين منظمات متعددة، بس Buffer بيتطلبه كباراميتر إلزامي في posts query."""
+    result = _send_graphql(GET_ORGANIZATIONS_QUERY, {}, api_key)
+    organizations = result.get("account", {}).get("organizations", [])
+    if not organizations:
+        raise RuntimeError("No Buffer organization found for this API key.")
+    return organizations[0]["id"]
+
+
+def count_pending_posts(organization_id: str, channel_id: str, api_key: str) -> int:
+    """عدد البوستات المعلّقة (queued أو scheduled) على القناة دي دلوقتي،
+    مقفول عند 10 لأن ده أقصى حاجة إحنا محتاجينها (حد Buffer)."""
+    result = _send_graphql(
+        GET_PENDING_POSTS_QUERY,
+        {"organizationId": organization_id, "channelId": channel_id},
+        api_key,
+    )
+    return len(result.get("posts", {}).get("edges", []))
+
+
+def _send_graphql(query: str, variables: dict, api_key: str) -> dict:
+    response = requests.post(
+        BUFFER_GRAPHQL_API,
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
+        json={"query": query, "variables": variables},
+        timeout=30,
+    )
+    response.raise_for_status()
+    data = response.json()
+    if data.get("errors"):
+        raise RuntimeError(str(data["errors"]))
+    return data.get("data", {})
 
 
 def parse_channel_ids(raw: str) -> list[str]:
@@ -286,6 +384,14 @@ def main() -> None:
         sys.exit("state/current_episode.json is missing.")
 
     channel_ids = parse_channel_ids(raw_ids)
+
+    organization_id = None
+    if ENABLE_PREFLIGHT_CHECK:
+        try:
+            organization_id = get_organization_id(api_key)
+        except Exception as error:
+            print(f"⚠️ تعذّر جلب organizationId، هنتخطى preflight check: {error}")
+
     episode = json.loads(EPISODE_PATH.read_text(encoding="utf-8"))
     title = str(episode.get("title", "Horror Episode")).strip() or "Horror Episode"
     caption = str(episode.get("caption", "")).strip()
@@ -330,6 +436,22 @@ def main() -> None:
 
         for number, channel_id in enumerate(channel_ids, 1):
             service = CHANNEL_SERVICES.get(channel_id, "unknown")
+
+            if organization_id:
+                try:
+                    pending = count_pending_posts(organization_id, channel_id, api_key)
+                    if pending >= CHANNEL_PENDING_LIMIT:
+                        reason = (
+                            f"channel queue full ({pending}/{CHANNEL_PENDING_LIMIT}) — "
+                            f"انشر يدويًا أو امسح بوستات معلّقة من Buffer Dashboard، "
+                            f"أو قلّل معدل التشغيل، أو رفّع خطة Buffer"
+                        )
+                        overall_failures.append((f"part{index}/{service}", reason))
+                        print(f"  ⏭️  Skipping channel {number}/{len(channel_ids)} ({service}): {reason}")
+                        continue
+                except Exception as error:
+                    print(f"  ⚠️ تعذّر فحص عدد البوستات المعلّقة لقناة {service}: {error}")
+
             try:
                 print(f"  Publishing channel {number}/{len(channel_ids)} ({service})...")
                 result = create_buffer_post(
