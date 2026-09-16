@@ -24,14 +24,14 @@ FINAL_OUTPUT = OUTPUT_DIR / "final_video.mp4"
 
 TARGET_WIDTH = 1080
 TARGET_HEIGHT = 1920
-MAX_DURATION_SECONDS = 178
+MAX_DURATION_SECONDS = 600
 
 # نص صغير، سطران كحد أقصى، أعلى الشاشة أسفل منطقة الكاميرا الأمامية.
 SUBTITLE_STYLE = (
-    "FontName=Arial,FontSize=30,Bold=0,"
+    "FontName=Arial,FontSize=10,Bold=0,"
     "PrimaryColour=&H00FFFFFF,OutlineColour=&H99000000,"
     "BorderStyle=1,Outline=2,Shadow=1,"
-    "Alignment=8,MarginL=70,MarginR=70,MarginV=145,"
+    "Alignment=8,MarginL=70,MarginR=70,MarginV=45,"
     "WrapStyle=2,Spacing=0"
 )
 
@@ -61,6 +61,7 @@ def get_audio_duration(path: Path) -> float:
 def normalize_clip(input_path: Path, output_path: Path, duration: float):
     run([
         "ffmpeg", "-y",
+        "-stream_loop", "-1",
         "-i", str(input_path),
         "-t", str(duration),
         "-vf",
@@ -142,7 +143,7 @@ def main():
 
     print(f"✅ الفيديو النهائي: {FINAL_OUTPUT}")
     print(f"✅ المدة: {narration_duration:.1f} ثانية")
-    print("✅ النص: صغير، سطران، أعلى الشاشة أسفل الكاميرا")
+    print("✅ النص: FontSize=10، سطران، أعلى الشاشة")
     print("✅ الصوت: narration_with_music.mp3")
     print("✅ الموسيقى مدمجة مسبقاً بنسبة 15%")
 
