@@ -55,14 +55,25 @@ jobs:
           BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
           BUFFER_CHANNEL_ID: ${{ secrets.BUFFER_CHANNEL_ID }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # الجزء التاني (لو الحلقة اتقسمت) بيتجدول بعد المدة دي بالساعات.
+          # 6 ساعات مختارة عمدًا عشان متتصادمش مع تشغيلة الـ cron الجاية
+          # (13:00 أو 17:00 UTC) — 4 أو 24 ساعة بتهبط بالظبط على تشغيلة
+          # تانية وبتعمل بوست مزدوج على نفس القناة في نفس اللحظة تقريبًا.
+          PART2_DELAY_HOURS: "6"
         run: python scripts/publish_buffer.py
 
       - name: Upload video as artifact (for your own records)
         uses: actions/upload-artifact@v4
         with:
           name: published-video
-          path: output/final_video.mp4
+          # final_video.mp4 (حلقة واحدة) أو final_video_part1.mp4 +
+          # final_video_part2.mp4 (حلقة متقسمة) — الاسم الثابت القديم
+          # كان بيفوّت الأرشفة تمامًا في حالة التقسيم.
+          path: output/final_video*.mp4
           retention-days: 14
+          # يفشل الخطوة بوضوح لو مفيش أي فيديو خالص، بدل ما يمر بصمت
+          # (warn) ونكتشف المشكلة بعد كام يوم بس.
+          if-no-files-found: error
 
       - name: Commit updated clip-tracking state
         run: |
