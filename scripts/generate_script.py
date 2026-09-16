@@ -1,63 +1,76 @@
-name: Create and Publish Horror Episode
+"""
+generate_script.py
+يستدعي Groq API (مجاني) عشان يولّد سيناريو القصة + كلمات البحث البصرية.
+بديل مباشر لـ node "AI Agent" اللي كان بيستخدم OpenAI في n8n.
 
-on:
-  schedule:
-    - cron: "0 13 * * *"   # الساعة 3 عصرًا بتوقيت القاهرة (UTC+2 ثابت)
-    - cron: "0 17 * * *"   # الساعة 7 مساءً بتوقيت القاهرة (UTC+2 ثابت)
-  workflow_dispatch: {}     # للتشغيل اليدوي وقت الاختبار
+يحتاج: متغير بيئة GROQ_API_KEY (مجاني من https://console.groq.com)
+"""
+import os
+import json
+import sys
+from pathlib import Path
+from groq import Groq  # pip install groq
 
-permissions:
-  contents: write
+SCRIPT_DIR = Path(__file__).parent
+PROMPT_PATH = SCRIPT_DIR.parent / "prompts" / "horror_system_prompt.md"
+OUTPUT_PATH = SCRIPT_DIR.parent / "state" / "current_episode.json"
 
-jobs:
-  build-draft:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+def load_system_prompt() -> str:
+    return PROMPT_PATH.read_text(encoding="utf-8")
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
 
-      - name: Generate script (Groq)
-        env:
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-        run: python scripts/generate_script.py
+def load_used_history(limit: int = 15) -> list[str]:
+    """يجيب آخر N قصص عشان الموديل يتجنب التكرار."""
+    history_path = SCRIPT_DIR.parent / "state" / "used_clips.json"
+    if not history_path.exists():
+        return []
+    data = json.loads(history_path.read_text(encoding="utf-8"))
+    return [h.get("title", "") for h in data.get("history", [])][-limit:]
 
-      - name: Fetch real stock clips (Pexels)
-        env:
-          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
-        run: python scripts/fetch_clips.py
 
-      - name: Generate human-like voice + synced subtitles (edge-tts)
-        run: python scripts/generate_voice.py
+def generate_episode() -> dict:
+    api_key = os.environ.get("GROQ_API_KEY")
+    if not api_key:
+        sys.exit("خطأ: لازم تضيف GROQ_API_KEY في GitHub Secrets")
 
-      - name: Assemble final video with burned captions (ffmpeg)
-        run: python scripts/assemble_video.py
+    client = Groq(api_key=api_key)
+    system_prompt = load_system_prompt()
+    recent_titles = load_used_history()
 
-      - name: Publish directly via Buffer
-        env:
-          BUFFER_ACCESS_TOKEN: ${{ secrets.BUFFER_ACCESS_TOKEN }}
-          BUFFER_CHANNEL_ID: ${{ secrets.BUFFER_CHANNEL_ID }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python scripts/publish_buffer.py
+    user_message = "اكتب حلقة جديدة تمامًا."
+    if recent_titles:
+        user_message += (
+            "\n\nالعناوين اللي اتستخدمت قبل كده (تجنب أي تشابه معاها):\n- "
+            + "\n- ".join(recent_titles)
+        )
 
-      - name: Upload video as artifact (for your own records)
-        uses: actions/upload-artifact@v4
-        with:
-          name: published-video
-          path: output/final_video.mp4
-          retention-days: 14
+    completion = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",  # موديل مجاني قوي على Groq
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message},
+        ],
+        temperature=0.9,  # تنويع أعلى بين الحلقات
+        max_tokens=3000,  # القصة بقت أطول (~2.5-2.8 دقيقة قراءة) فمحتاجة مساحة أكبر
+        response_format={"type": "json_object"},
+    )
 
-      - name: Commit updated clip-tracking state
-        run: |
-          git config user.name "content-bot"
-          git config user.email "bot@users.noreply.github.com"
-          git add state/used_clips.json
-          git commit -m "chore: update used clips tracking [skip ci]" || echo "لا يوجد تغيير"
-          git push
+    raw = completion.choices[0].message.content
+    episode = json.loads(raw)
+
+    required_keys = {"narration", "visual_keywords", "title", "caption"}
+    if not required_keys.issubset(episode.keys()):
+        sys.exit(f"خطأ: الرد من الموديل ناقص حقول مطلوبة: {episode.keys()}")
+
+    return episode
+
+
+if __name__ == "__main__":
+    episode = generate_episode()
+    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    OUTPUT_PATH.write_text(
+        json.dumps(episode, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    print(f"✅ اتكتبت الحلقة: {episode['title']}")
+    print(f"   كلمات البحث: {episode['visual_keywords']}")
