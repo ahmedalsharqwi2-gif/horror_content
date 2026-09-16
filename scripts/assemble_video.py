@@ -52,7 +52,7 @@ MAX_DURATION_SECONDS = 600
 #   Outline=3, Shadow=0, BorderStyle=1 -> نص أبيض حاد بحدّ أسود صلب،
 #                    من غير ظل منفصل
 SUBTITLE_STYLE = (
-    "FontName=Arial,FontSize=64,Bold=1,"
+    "FontName=Arial,FontSize=12,Bold=1,"
     "PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,"
     "BorderStyle=1,Outline=3,Shadow=0,"
     "Alignment=8,MarginL=60,MarginR=60,MarginV=260,"
@@ -240,7 +240,7 @@ def main():
             print(f"✅ الجزء {index}: {output_path}")
             print(f"✅ مدة الجزء {index}: {duration:.1f} ثانية")
 
-    print("✅ النص: FontSize=64 Bold، سطران كحد أقصى، أعلى الشاشة (MarginV=260)، في المنتصف")
+    print("✅ النص: FontSize=12 Bold، سطران كحد أقصى، أعلى الشاشة (MarginV=260)، في المنتصف")
     print("✅ الموسيقى مدمجة مسبقاً بنسبة 15%")
 
 
