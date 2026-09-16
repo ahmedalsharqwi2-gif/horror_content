@@ -2,12 +2,14 @@
 generate_voice.py
 
 يحوّل narration إلى صوت عربي باستخدام edge-tts، مع دعم:
-1) تشكيل خفيف جداً في الكلمات التي قد يخطئ Edge TTS في نطقها فقط (وليس كل النص).
+1) بدون أي تشكيل مضاف على النص (اتلغى بناءً على طلبك لأنه كان غير مظبوط).
 2) ترجمة SRT متزامنة مع توقيت الكلمات.
 3) خلط موسيقى الرعب داخل ملف صوت واحد بنسبة 15%.
 4) نهاية "هوك" قوية ومتنوعة تضمن اكتمال القصة بشكل شيّق ومناسب للترند.
 5) تقسيم تلقائي للقصة إلى جزئين (ريلز) لو كانت طويلة عن حد الريلز الواحد،
    مع تنويه واضح في نهاية الجزء الأول (كليف هانجر) وبداية الجزء الثاني (استكمال).
+6) سكتات حقيقية بين الجمل أثناء الرواية (مش مجرد فاصلة في النص) لتحقيق
+   إحساس رعب وتشويق فعلي، بمدد مختلفة حسب نوع نهاية الجملة (نقطة/سؤال/تعجب/...).
 
 الملفات الناتجة (لو القصة اتعملت في ريلز واحد):
 - downloaded_clips/narration_voice.mp3
@@ -21,6 +23,11 @@ generate_voice.py
 
 الموسيقى المطلوبة:
 - assets/background_music.mp3
+
+ملاحظة مهمة: السكريبت ده بياخد نص القصة (narration) جاهز من
+state/current_episode.json. توليد نص القصة نفسه (اللي حاليًا بيبقى "هبل"
+على حد وصفك) مش جزء من السكريبت ده ولا من assemble_video.py - لو عايز
+تحسين جودة/واقعية القصص، ابعتلي السكريبت اللي بيكتب narration وهساعدك فيه.
 """
 
 import asyncio
@@ -44,13 +51,11 @@ BACKGROUND_MUSIC = ASSETS_DIR / "background_music.mp3"
 
 # ---------------------------------------------------------------------------
 # إعدادات الصوت: إيقاع أبطأ وطبقة صوت أعمق قليلاً لإحساس رعب أكبر.
-# ملاحظة مهمة وصادقة: أصوات edge-tts العربية (زي ar-EG-ShakirNeural) لسه
-# مبتدعمش وسوم "style" العاطفية (زي cheerful/sad/terrified) المتاحة في بعض
-# الأصوات الإنجليزية. يعني أقصى تحكم متاح فعلياً هو rate و pitch و volume،
-# وهو اللي اتضبط هنا (أبطأ وأعمق من الإعداد الافتراضي) عشان يديك إحساس
-# ترقّب وتوجّس. لو عايز رعب أقوى في الأداء نفسه، أفضل حل عملي إضافي هو
-# إضافة "..." أو فواصل في نص الـ narration نفسه عند لحظات التشويق، لأن
-# ده بيأثر على طول السكتة الطبيعية أثناء النطق.
+# ملاحظة صادقة: أصوات edge-tts العربية (زي ar-EG-ShakirNeural) لسه مبتدعمش
+# وسوم "style" العاطفية (زي cheerful/sad/terrified) المتاحة في بعض الأصوات
+# الإنجليزية. يعني أقصى تحكم متاح فعليًا هو rate و pitch و volume + السكتات
+# الحقيقية بين الجمل اللي بنضيفها دلوقتي تحت (ده اللي فعليًا بيفرق في
+# إحساس الرعب أكتر من أي إعداد تاني).
 # ---------------------------------------------------------------------------
 VOICE = "ar-EG-ShakirNeural"
 RATE = "-15%"
@@ -58,20 +63,29 @@ PITCH = "-9Hz"
 VOLUME = "+0%"
 
 MUSIC_VOLUME = 0.15
-WORDS_PER_CAPTION_CHUNK = 6
+
+# قللنا عدد الكلمات في الكابشن الواحد عشان يبقى مناسب لحجم الخط الكبير
+# (FontSize=56 Bold) في assemble_video.py من غير ما يحصل تكدّس أو تجاوز
+# للشاشة.
+WORDS_PER_CAPTION_CHUNK = 4
 
 # متوسط تقديري لعدد الكلمات في الثانية بعد تبطيء الإيقاع (RATE أعلاه)،
 # يُستخدم فقط لتقدير مدة القصة قبل التوليد الفعلي، لتحديد هل نقسمها جزئين أو لا.
-# لو حسّيت إن التقدير مش دقيق مع صوتك، غيّر الرقم ده على حسب التجربة الفعلية.
 AVG_WORDS_PER_SECOND = 2.1
 
 # أقصى مدة مقترحة للريلز الواحد (بالثانية) قبل ما نلجأ للتقسيم لجزئين.
-# غيّرها لو عايز الريلز يكون أطول أو أقصر.
 MAX_SINGLE_REEL_SECONDS = 75
 
+# مدد السكتات الحقيقية (بالثانية) بين الجمل، حسب نوع نهاية الجملة.
+# دي سكتات فعلية في ملف الصوت نفسه (مش مجرد علامة ترقيم)، وده اللي بيدي
+# إحساس الترقّب والرعب أثناء الرواية.
+PAUSE_AFTER_ELLIPSIS = 1.3   # بعد "..." أو "…" -> سكتة طويلة للتشويق
+PAUSE_AFTER_QUESTION_EXCLAIM = 0.75  # بعد "؟" أو "!"
+PAUSE_AFTER_PERIOD = 0.45    # بعد "."
+DEFAULT_PAUSE = 0.5
+
 # نهايات "هوك" متنوعة تضمن اكتمال القصة بشكل شيّق ومناسب للترند،
-# بيتم اختيار واحدة عشوائياً في كل مرة عشان النهاية متتكررش بنفس الشكل
-# في كل حلقة.
+# بيتم اختيار واحدة عشوائياً في كل مرة عشان النهاية متتكررش بنفس الشكل.
 HOOK_ENDINGS = [
     "وهنا تنتهي القصة... لكن هل كنت ستفتح الباب لو كنت مكانه؟",
     "والسؤال اللي هيفضل عالق في دماغك: هل كنت هتكمل ولا هتهرب؟",
@@ -108,23 +122,12 @@ def run(command: list[str]):
     return result
 
 
-def light_diacritics(text: str) -> str:
+def normalize_text(text: str) -> str:
     """
-    تشكيل انتقائي جداً - فقط للكلمات التي غالباً هيخطئ Edge TTS في نطقها،
-    وليس تشكيلاً كاملاً للنص. الهدف الوحيد مساعدة محرك النطق على النطق
-    الصحيح، مش تغيير شكل النص المكتوب أو المبالغة في التشكيل.
+    بدون أي تشكيل مضاف - التشكيل اتلغى بالكامل بناءً على طلبك لأن الناتج
+    كان غير مظبوط. الدالة دي بتعمل بس تنظيف مسافات، من غير إضافة أي حركات.
     """
-    text = re.sub(r"\s+", " ", text).strip()
-    replacements = [
-        ("إن الله", "إِنَّ اللّٰه"),
-        ("أن الله", "أَنَّ اللّٰه"),
-        ("الله", "اللّٰه"),
-        ("اطمئن", "اِطْمَئِنّ"),
-        ("اطمئني", "اِطْمَئِنِّي"),
-    ]
-    for old, new in replacements:
-        text = text.replace(old, new)
-    return text
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def srt_time(seconds: float) -> str:
@@ -142,7 +145,7 @@ def two_lines(words: list[str]) -> str:
     (Alignment=8 في ملف الترجمة في assemble_video.py) مش يمين ولا شمال.
     """
     words = [word.strip() for word in words if word.strip()]
-    if len(words) <= 3:
+    if len(words) <= 2:
         return " ".join(words)
     midpoint = (len(words) + 1) // 2
     return " ".join(words[:midpoint]) + r"\N" + " ".join(words[midpoint:])
@@ -151,6 +154,17 @@ def two_lines(words: list[str]) -> str:
 def split_sentences(text: str) -> list[str]:
     parts = re.split(r"(?<=[.!؟…])\s+", text.strip())
     return [part.strip() for part in parts if part.strip()]
+
+
+def pause_duration_for(sentence: str) -> float:
+    stripped = sentence.strip()
+    if stripped.endswith("…") or stripped.endswith("..."):
+        return PAUSE_AFTER_ELLIPSIS
+    if stripped.endswith("؟") or stripped.endswith("!"):
+        return PAUSE_AFTER_QUESTION_EXCLAIM
+    if stripped.endswith("."):
+        return PAUSE_AFTER_PERIOD
+    return DEFAULT_PAUSE
 
 
 def build_final_narration(raw_narration: str) -> list[str]:
@@ -177,8 +191,6 @@ def build_final_narration(raw_narration: str) -> list[str]:
             text = f"{text} {hook}"
         return [text]
 
-    # تقسيم عند أقرب حد جملة لمنتصف عدد الكلمات، عشان القسمة تكون طبيعية
-    # ومحدش يتقطع في نص كلامه.
     half_words = total_words / 2
     cumulative = 0
     split_index = len(sentences) - 1
@@ -191,7 +203,6 @@ def build_final_narration(raw_narration: str) -> list[str]:
     part_one_sentences = sentences[: split_index + 1]
     part_two_sentences = sentences[split_index + 1:]
 
-    # لو القسمة طلعت مش متوازنة (جزء فاضي)، ارجع للقصة كجزء واحد بدل ما نكسرها.
     if not part_one_sentences or not part_two_sentences:
         if hook not in text:
             text = f"{text} {hook}"
@@ -206,54 +217,135 @@ def build_final_narration(raw_narration: str) -> list[str]:
     return [part_one, part_two]
 
 
-async def synthesize_voice(text: str, voice_audio: Path, subtitles: Path):
-    communicate = edge_tts.Communicate(
-        text,
-        VOICE,
-        rate=RATE,
-        pitch=PITCH,
-        volume=VOLUME,
-    )
-    word_events = []
-    with voice_audio.open("wb") as audio_file:
-        async for chunk in communicate.stream():
-            if chunk["type"] == "audio":
-                audio_file.write(chunk["data"])
-            elif chunk["type"] == "WordBoundary":
-                word_events.append(chunk)
+def probe_duration(path: Path) -> float:
+    result = subprocess.run([
+        "ffprobe", "-v", "error", "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1", str(path),
+    ], capture_output=True, text=True)
+    if result.returncode != 0 or not result.stdout.strip():
+        sys.exit(f"❌ تعذر قراءة مدة الملف: {path}")
+    return float(result.stdout.strip())
 
-    if word_events:
-        subtitle_blocks = []
-        for index in range(0, len(word_events), WORDS_PER_CAPTION_CHUNK):
-            group = word_events[index:index + WORDS_PER_CAPTION_CHUNK]
-            start = group[0]["offset"] / 10_000_000
-            end = (
-                group[-1]["offset"] + group[-1]["duration"]
-            ) / 10_000_000
-            content = two_lines([event["text"] for event in group])
-            subtitle_blocks.append((start, max(end, start + 0.25), content))
-    else:
-        # بعض إصدارات/أصوات Edge TTS لا ترسل WordBoundary.
-        # نستخدم مدة ملف الصوت لتوليد SRT تقريبي بدلاً من إيقاف البناء.
-        print("⚠️ Edge TTS لم يرجع WordBoundary؛ سيتم استخدام توقيت تقريبي.")
-        probe = subprocess.run([
-            "ffprobe", "-v", "error", "-show_entries", "format=duration",
-            "-of", "default=noprint_wrappers=1:nokey=1", str(voice_audio),
-        ], capture_output=True, text=True)
-        if probe.returncode != 0 or not probe.stdout.strip():
-            sys.exit("❌ تعذر قراءة مدة ملف الصوت لإنشاء الترجمة.")
-        audio_duration = float(probe.stdout.strip())
-        words = re.findall(r"\S+", text)
-        if not words:
-            sys.exit("❌ النص فارغ ولا يمكن إنشاء ترجمة.")
-        subtitle_blocks = []
-        total_groups = (len(words) + WORDS_PER_CAPTION_CHUNK - 1) // WORDS_PER_CAPTION_CHUNK
-        chunk_duration = audio_duration / total_groups
-        for index in range(0, len(words), WORDS_PER_CAPTION_CHUNK):
-            group = words[index:index + WORDS_PER_CAPTION_CHUNK]
-            start = (index // WORDS_PER_CAPTION_CHUNK) * chunk_duration
-            end = min(audio_duration, start + chunk_duration)
-            subtitle_blocks.append((start, max(end, start + 0.25), two_lines(group)))
+
+def build_silence_clip(duration: float, path: Path):
+    run([
+        "ffmpeg", "-y",
+        "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono",
+        "-t", f"{duration:.3f}",
+        "-c:a", "libmp3lame", "-b:a", "192k",
+        str(path),
+    ])
+
+
+async def synthesize_sentences(sentences: list[str], work_prefix: str) -> list[dict]:
+    """
+    بيولّد كل جملة في القصة كملف صوت منفصل، وبعد كل جملة (غير الأخيرة)
+    بيولّد ملف سكتة حقيقي بمدة تناسب نوع نهاية الجملة. ده اللي بيحقق
+    سكتات فعلية أثناء الرواية بدل الاعتماد على علامات الترقيم بس.
+    """
+    segments = []
+    for index, sentence in enumerate(sentences):
+        seg_path = CLIPS_DIR / f"_seg_{work_prefix}_{index:03d}.mp3"
+        events = []
+        communicate = edge_tts.Communicate(
+            sentence, VOICE, rate=RATE, pitch=PITCH, volume=VOLUME,
+        )
+        with seg_path.open("wb") as audio_file:
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    audio_file.write(chunk["data"])
+                elif chunk["type"] == "WordBoundary":
+                    events.append(chunk)
+
+        duration = probe_duration(seg_path)
+        segments.append({
+            "path": seg_path,
+            "duration": duration,
+            "events": events,
+            "sentence": sentence,
+            "is_silence": False,
+        })
+
+        if index < len(sentences) - 1:
+            pause = pause_duration_for(sentence)
+            pause_path = CLIPS_DIR / f"_pause_{work_prefix}_{index:03d}.mp3"
+            build_silence_clip(pause, pause_path)
+            segments.append({
+                "path": pause_path,
+                "duration": pause,
+                "events": None,
+                "sentence": None,
+                "is_silence": True,
+            })
+
+    return segments
+
+
+def synthesize_voice(text: str, voice_audio: Path, subtitles: Path, work_prefix: str):
+    sentences = split_sentences(text)
+    if not sentences:
+        sys.exit("❌ النص فارغ ولا يمكن إنشاء صوت.")
+
+    segments = asyncio.run(synthesize_sentences(sentences, work_prefix))
+
+    # دمج كل المقاطع (صوت + سكتات) في ملف صوت واحد متصل، عشان السكتات
+    # تتحس فعلياً أثناء رواية القصة.
+    inputs = []
+    for segment in segments:
+        inputs += ["-i", str(segment["path"])]
+    concat_filter = (
+        "".join(f"[{i}:a]" for i in range(len(segments)))
+        + f"concat=n={len(segments)}:v=0:a=1[aout]"
+    )
+    run([
+        "ffmpeg", "-y", *inputs,
+        "-filter_complex", concat_filter,
+        "-map", "[aout]",
+        "-c:a", "libmp3lame", "-b:a", "192k",
+        str(voice_audio),
+    ])
+
+    # بناء توقيت الترجمة على تايم لاين الملف المدموج بالكامل (صوت + سكتات).
+    all_word_events = []
+    cumulative_seconds = 0.0
+    for segment in segments:
+        if segment["is_silence"]:
+            cumulative_seconds += segment["duration"]
+            continue
+
+        if segment["events"]:
+            for event in segment["events"]:
+                all_word_events.append({
+                    "offset": event["offset"] + int(cumulative_seconds * 10_000_000),
+                    "duration": event["duration"],
+                    "text": event["text"],
+                })
+        else:
+            # بعض إصدارات/أصوات Edge TTS لا ترسل WordBoundary لجملة معينة.
+            # نوزّع توقيت تقريبي على كلمات الجملة دي فقط، باستخدام مدتها الفعلية.
+            print("⚠️ Edge TTS لم يرجع WordBoundary لجملة؛ سيتم استخدام توقيت تقريبي لها.")
+            words = re.findall(r"\S+", segment["sentence"] or "")
+            if words:
+                per_word = segment["duration"] / len(words)
+                for word_index, word in enumerate(words):
+                    all_word_events.append({
+                        "offset": int((cumulative_seconds + word_index * per_word) * 10_000_000),
+                        "duration": int(per_word * 10_000_000),
+                        "text": word,
+                    })
+
+        cumulative_seconds += segment["duration"]
+
+    if not all_word_events:
+        sys.exit("❌ تعذر إنشاء توقيت الترجمة.")
+
+    subtitle_blocks = []
+    for index in range(0, len(all_word_events), WORDS_PER_CAPTION_CHUNK):
+        group = all_word_events[index:index + WORDS_PER_CAPTION_CHUNK]
+        start = group[0]["offset"] / 10_000_000
+        end = (group[-1]["offset"] + group[-1]["duration"]) / 10_000_000
+        content = two_lines([event["text"] for event in group])
+        subtitle_blocks.append((start, max(end, start + 0.25), content))
 
     srt_lines = []
     for number, (start, end, content) in enumerate(subtitle_blocks, 1):
@@ -264,6 +356,9 @@ async def synthesize_voice(text: str, voice_audio: Path, subtitles: Path):
             "",
         ])
     subtitles.write_text("\n".join(srt_lines), encoding="utf-8")
+
+    for segment in segments:
+        Path(segment["path"]).unlink(missing_ok=True)
 
 
 def mix_music_into_voice(voice_audio: Path, final_audio: Path):
@@ -297,7 +392,7 @@ def process_part(text: str, suffix: str) -> dict:
     final_audio = CLIPS_DIR / f"narration_with_music{suffix}.mp3"
     subtitles = CLIPS_DIR / f"narration{suffix}.srt"
 
-    asyncio.run(synthesize_voice(text, voice_audio, subtitles))
+    synthesize_voice(text, voice_audio, subtitles, work_prefix=suffix.strip("_") or "single")
     mix_music_into_voice(voice_audio, final_audio)
 
     return {
@@ -321,7 +416,7 @@ def main():
     ASSETS_DIR.mkdir(parents=True, exist_ok=True)
 
     parts_text = build_final_narration(raw_narration)
-    parts_text = [light_diacritics(part) for part in parts_text]
+    parts_text = [normalize_text(part) for part in parts_text]
 
     if len(parts_text) == 1:
         result = process_part(parts_text[0], suffix="")
@@ -347,6 +442,8 @@ def main():
     )
 
     print(f"✅ مستوى الموسيقى: {int(MUSIC_VOLUME * 100)}%")
+    print("✅ تم إلغاء التشكيل بالكامل من النص")
+    print("✅ تم إضافة سكتات حقيقية بين الجمل داخل ملف الصوت")
 
 
 if __name__ == "__main__":
