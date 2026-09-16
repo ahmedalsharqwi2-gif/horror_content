@@ -1,37 +1,112 @@
 """
 generate_voice.py
-يحوّل نص القصة (المُشكّل) لصوت بشري طبيعي باستخدام edge-tts،
-وفي نفس الوقت بيولّد ملف ترجمة (.srt) بتوقيت متزامن مع الكلام،
-عشان الكابشن يتحرك مع النطق لحظة بلحظة (Karaoke-style captions).
+
+يحوّل narration إلى صوت عربي باستخدام edge-tts، ثم:
+1) يضيف تشكيلًا خفيفًا في الكلمات الصعبة فقط.
+2) ينشئ ترجمة SRT متزامنة مع توقيت الكلمات.
+3) يخلط موسيقى الرعب داخل ملف صوت واحد بنسبة 15%.
+
+الملفات الناتجة:
+- downloaded_clips/narration_voice.mp3
+- downloaded_clips/narration_with_music.mp3
+- downloaded_clips/narration.srt
+
+الموسيقى المطلوبة:
+- assets/background_music.mp3
 """
-import json
+
 import asyncio
+import json
+import re
+import subprocess
 import sys
 from pathlib import Path
-import edge_tts  # pip install edge-tts>=6.1.9
+
+import edge_tts
 
 SCRIPT_DIR = Path(__file__).parent
-EPISODE_PATH = SCRIPT_DIR.parent / "state" / "current_episode.json"
-OUTPUT_AUDIO = SCRIPT_DIR.parent / "downloaded_clips" / "narration.mp3"
-OUTPUT_SUBTITLES = SCRIPT_DIR.parent / "downloaded_clips" / "narration.srt"
+ROOT_DIR = SCRIPT_DIR.parent
+STATE_DIR = ROOT_DIR / "state"
+CLIPS_DIR = ROOT_DIR / "downloaded_clips"
+ASSETS_DIR = ROOT_DIR / "assets"
 
-# غيّر ده لو عايز صوت مختلف بين الحلقات لتنويع أكبر
+EPISODE_PATH = STATE_DIR / "current_episode.json"
+VOICE_AUDIO = CLIPS_DIR / "narration_voice.mp3"
+FINAL_AUDIO = CLIPS_DIR / "narration_with_music.mp3"
+SUBTITLES = CLIPS_DIR / "narration.srt"
+BACKGROUND_MUSIC = ASSETS_DIR / "background_music.mp3"
+
 VOICE = "ar-EG-ShakirNeural"
-RATE = "-4%"     # سرعة أبطأ شوية = إيقاع رعب أكتر
-PITCH = "-2Hz"   # نبرة أعمق شوية
+RATE = "-12%"
+PITCH = "-7Hz"
+VOLUME = "+0%"
+MUSIC_VOLUME = 0.15
+WORDS_PER_CAPTION_CHUNK = 6
 
-WORDS_PER_CAPTION_CHUNK = 2  # كام كلمة تظهر مع بعض في نفس اللحظة (2 بيدي إيقاع سلس)
+
+def run(command: list[str]):
+    result = subprocess.run(command, capture_output=True, text=True)
+    if result.returncode != 0:
+        sys.exit(
+            "❌ فشل الأمر:\n"
+            + " ".join(command)
+            + "\n\n"
+            + result.stderr
+        )
+    return result
 
 
-async def synthesize_with_timing(text: str, audio_path: Path, subs_path: Path):
-    # مهم: من إصدار edge-tts 7.2.0، الإعداد الافتراضي بقى "SentenceBoundary"
-    # بدل "WordBoundary"، فلازم نحددها صراحة عشان نقدر نجمّع توقيت كل كلمة.
+def light_diacritics(text: str) -> str:
+    """تشكيل انتقائي للكلمات التي قد يخطئ Edge TTS في نطقها."""
+    text = re.sub(r"\s+", " ", text).strip()
+    replacements = [
+        ("إن الله", "إِنَّ اللّٰه"),
+        ("أن الله", "أَنَّ اللّٰه"),
+        ("إنك", "إِنَّكَ"),
+        ("إنكِ", "إِنَّكِ"),
+        ("الله", "اللّٰه"),
+        ("لكن", "لٰكِن"),
+        ("لأن", "لِأَنَّ"),
+        ("ألا", "أَلَا"),
+        ("يا رب", "يَا رَبّ"),
+        ("اطمئن", "اِطْمَئِنّ"),
+        ("اطمئني", "اِطْمَئِنِّي"),
+        ("مطمئن", "مُطْمَئِنّ"),
+        ("حقا", "حَقًّا"),
+        ("حقًا", "حَقًّا"),
+    ]
+    for old, new in replacements:
+        text = text.replace(old, new)
+    return text
+
+
+def srt_time(seconds: float) -> str:
+    milliseconds = max(0, int(round(seconds * 1000)))
+    hours, remainder = divmod(milliseconds, 3_600_000)
+    minutes, remainder = divmod(remainder, 60_000)
+    secs, millis = divmod(remainder, 1_000)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
+
+
+def two_lines(words: list[str]) -> str:
+    words = [word.strip() for word in words if word.strip()]
+    if len(words) <= 3:
+        return " ".join(words)
+    midpoint = (len(words) + 1) // 2
+    # \\N يفهمها libass كسطر جديد عند حرق SRT بواسطة ffmpeg.
+    return " ".join(words[:midpoint]) + r"\N" + " ".join(words[midpoint:])
+
+
+async def synthesize_voice(text: str):
     communicate = edge_tts.Communicate(
-        text, VOICE, rate=RATE, pitch=PITCH, boundary="WordBoundary"
+        text,
+        VOICE,
+        rate=RATE,
+        pitch=PITCH,
+        volume=VOLUME,
     )
-
     word_events = []
-    with open(audio_path, "wb") as audio_file:
+    with VOICE_AUDIO.open("wb") as audio_file:
         async for chunk in communicate.stream():
             if chunk["type"] == "audio":
                 audio_file.write(chunk["data"])
@@ -39,37 +114,81 @@ async def synthesize_with_timing(text: str, audio_path: Path, subs_path: Path):
                 word_events.append(chunk)
 
     if not word_events:
-        sys.exit("خطأ: edge-tts مرجعش أي توقيت كلمات — تأكد إن النسخة >=6.1.9")
+        sys.exit("❌ Edge TTS لم يرجع توقيت الكلمات.")
 
-    # نجمع كل WORDS_PER_CAPTION_CHUNK كلمة في "كيو" واحد بدل ما يكون كل كلمة لوحدها،
-    # عشان القراءة تبقى مريحة للعين مع الحفاظ على التزامن الدقيق مع الصوت.
-    submaker = edge_tts.SubMaker()
-    for i in range(0, len(word_events), WORDS_PER_CAPTION_CHUNK):
-        group = word_events[i:i + WORDS_PER_CAPTION_CHUNK]
-        first, last = group[0], group[-1]
-        merged_chunk = {
-            "type": "WordBoundary",
-            "offset": first["offset"],
-            "duration": (last["offset"] + last["duration"]) - first["offset"],
-            "text": " ".join(g["text"] for g in group),
-        }
-        submaker.feed(merged_chunk)
+    subtitle_blocks = []
+    for index in range(0, len(word_events), WORDS_PER_CAPTION_CHUNK):
+        group = word_events[index:index + WORDS_PER_CAPTION_CHUNK]
+        start = group[0]["offset"] / 10_000_000
+        end = (
+            group[-1]["offset"] + group[-1]["duration"]
+        ) / 10_000_000
+        content = two_lines([event["text"] for event in group])
+        subtitle_blocks.append((start, max(end, start + 0.25), content))
 
-    subs_path.write_text(submaker.get_srt(), encoding="utf-8")
+    srt_lines = []
+    for number, (start, end, content) in enumerate(subtitle_blocks, 1):
+        srt_lines.extend([
+            str(number),
+            f"{srt_time(start)} --> {srt_time(end)}",
+            content,
+            "",
+        ])
+    SUBTITLES.write_text("\n".join(srt_lines), encoding="utf-8")
+
+
+def mix_music_into_voice():
+    """ينتج ملفاً واحداً يحتوي على الصوت والموسيقى بنسبة 15%."""
+    if not BACKGROUND_MUSIC.exists():
+        print("⚠️ background_music.mp3 غير موجود؛ سيتم نسخ الصوت بدون موسيقى.")
+        run([
+            "ffmpeg", "-y", "-i", str(VOICE_AUDIO),
+            "-c:a", "libmp3lame", "-b:a", "192k", str(FINAL_AUDIO),
+        ])
+        return
+
+    run([
+        "ffmpeg", "-y",
+        "-i", str(VOICE_AUDIO),
+        "-stream_loop", "-1", "-i", str(BACKGROUND_MUSIC),
+        "-filter_complex",
+        "[0:a]volume=1.0[voice];"
+        "[1:a]volume=0.15[music];"
+        "[voice][music]amix=inputs=2:duration=first:dropout_transition=3:normalize=0[aout]",
+        "-map", "[aout]",
+        "-c:a", "libmp3lame",
+        "-b:a", "192k",
+        "-shortest",
+        str(FINAL_AUDIO),
+    ])
 
 
 def main():
     if not EPISODE_PATH.exists():
-        sys.exit("خطأ: مفيش current_episode.json — شغّل generate_script.py الأول")
+        sys.exit("❌ state/current_episode.json غير موجود.")
 
     episode = json.loads(EPISODE_PATH.read_text(encoding="utf-8"))
-    narration_text = episode["narration"]
+    narration = str(episode.get("narration", "")).strip()
+    if not narration:
+        sys.exit("❌ حقل narration غير موجود أو فارغ.")
 
-    OUTPUT_AUDIO.parent.mkdir(parents=True, exist_ok=True)
-    asyncio.run(synthesize_with_timing(narration_text, OUTPUT_AUDIO, OUTPUT_SUBTITLES))
+    narration = light_diacritics(narration)
+    episode["narration"] = narration
+    EPISODE_PATH.write_text(
+        json.dumps(episode, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
-    print(f"✅ اتولّد الصوت في: {OUTPUT_AUDIO}")
-    print(f"✅ اتولّدت الترجمة المتزامنة في: {OUTPUT_SUBTITLES}")
+    CLIPS_DIR.mkdir(parents=True, exist_ok=True)
+    ASSETS_DIR.mkdir(parents=True, exist_ok=True)
+
+    asyncio.run(synthesize_voice(narration))
+    mix_music_into_voice()
+
+    print(f"✅ صوت الراوي: {VOICE_AUDIO}")
+    print(f"✅ الصوت النهائي مع الموسيقى: {FINAL_AUDIO}")
+    print(f"✅ الترجمة المتزامنة: {SUBTITLES}")
+    print(f"✅ مستوى الموسيقى: {int(MUSIC_VOLUME * 100)}%")
 
 
 if __name__ == "__main__":
