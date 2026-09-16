@@ -2,8 +2,18 @@
 assemble_video.py
 
 يجمع المقاطع مع الصوت النهائي الناتج من generate_voice.py، ويحرق
-الترجمة الصغيرة المتزامنة أعلى الشاشة أسفل منطقة الكاميرا الأمامية.
-الموسيقى مدمجة مسبقاً داخل narration_with_music.mp3، لذلك لا نخلطها هنا مرة أخرى.
+الترجمة الصغيرة المتزامنة أعلى الشاشة أسفل منطقة الكاميرا الأمامية،
+في المنتصف تماماً (مش يمين ولا شمال).
+
+الموسيقى مدمجة مسبقاً داخل ملف narration_with_music*.mp3، لذلك لا نخلطها هنا مرة أخرى.
+
+لو القصة اتقسمت جزئين في generate_voice.py (episode["parts"] فيه عنصرين)،
+هنولد ريلزين منفصلين:
+- output/final_video_part1.mp4
+- output/final_video_part2.mp4
+
+ولو جزء واحد بس (الوضع الافتراضي)، هنولد:
+- output/final_video.mp4
 """
 
 import json
@@ -18,15 +28,15 @@ CLIPS_DIR = ROOT_DIR / "downloaded_clips"
 OUTPUT_DIR = ROOT_DIR / "output"
 
 FETCHED_CLIPS_PATH = STATE_DIR / "fetched_clips.json"
-FINAL_AUDIO = CLIPS_DIR / "narration_with_music.mp3"
-SUBTITLES = CLIPS_DIR / "narration.srt"
-FINAL_OUTPUT = OUTPUT_DIR / "final_video.mp4"
+EPISODE_PATH = STATE_DIR / "current_episode.json"
 
 TARGET_WIDTH = 1080
 TARGET_HEIGHT = 1920
 MAX_DURATION_SECONDS = 600
 
-# نص صغير، سطران كحد أقصى، أعلى الشاشة أسفل منطقة الكاميرا الأمامية.
+# نص صغير (FontSize=10)، سطران كحد أقصى، أعلى الشاشة أسفل منطقة الكاميرا
+# الأمامية. Alignment=8 في libass = أعلى المنتصف (وليس يمين أو شمال)،
+# وده بيخلي كل سطر يتمركز لوحده في نص الشاشة أفقياً.
 SUBTITLE_STYLE = (
     "FontName=Arial,FontSize=10,Bold=0,"
     "PrimaryColour=&H00FFFFFF,OutlineColour=&H99000000,"
@@ -75,11 +85,11 @@ def normalize_clip(input_path: Path, output_path: Path, duration: float):
     ])
 
 
-def concat_clips(paths: list[Path], output_path: Path):
+def concat_clips(paths: list[Path], output_path: Path, tmp_name: str):
     if not paths:
         sys.exit("❌ لا توجد مقاطع لتجميعها.")
 
-    list_file = paths[0].parent / "concat_list.txt"
+    list_file = paths[0].parent / tmp_name
     list_file.write_text(
         "\n".join(f"file '{path.name}'" for path in paths),
         encoding="utf-8",
@@ -94,13 +104,12 @@ def concat_clips(paths: list[Path], output_path: Path):
     ])
 
 
-def add_audio_and_subtitles(video_path: Path):
-    # ملف الصوت يحتوي بالفعل على الراوي + الموسيقى بنسبة 15%.
-    subtitle_filter = f"subtitles={SUBTITLES}:force_style='{SUBTITLE_STYLE}'"
+def add_audio_and_subtitles(video_path: Path, final_audio: Path, subtitles: Path, output_path: Path):
+    subtitle_filter = f"subtitles={subtitles}:force_style='{SUBTITLE_STYLE}'"
     run([
         "ffmpeg", "-y",
         "-i", str(video_path),
-        "-i", str(FINAL_AUDIO),
+        "-i", str(final_audio),
         "-vf", subtitle_filter,
         "-map", "0:v",
         "-map", "1:a",
@@ -113,12 +122,56 @@ def add_audio_and_subtitles(video_path: Path):
         "-b:a", "192k",
         "-shortest",
         "-movflags", "+faststart",
-        str(FINAL_OUTPUT),
+        str(output_path),
     ])
 
 
+def split_clips_by_weight(clips: list, weights: list[float]) -> list[list]:
+    """يوزع قائمة المقاطع المتاحة على أجزاء بنسب متناسبة مع مدة صوت كل جزء."""
+    total_weight = sum(weights) or 1.0
+    counts = []
+    remaining = len(clips)
+    for index, weight in enumerate(weights):
+        if index == len(weights) - 1:
+            count = remaining
+        else:
+            count = max(1, round(len(clips) * (weight / total_weight)))
+            count = min(count, remaining - (len(weights) - index - 1))
+        counts.append(count)
+        remaining -= count
+
+    result = []
+    cursor = 0
+    for count in counts:
+        chunk = clips[cursor: cursor + count]
+        if not chunk:
+            # لو معندناش مقاطع كفاية لهذا الجزء، استخدم كل المقاطع المتاحة
+            # بدل ما الجزء يفضل من غير فيديو خالص.
+            chunk = clips
+        result.append(chunk)
+        cursor += count
+    return result
+
+
+def build_video_part(clips: list, final_audio: Path, subtitles: Path, output_path: Path, tmp_prefix: str) -> float:
+    narration_duration = min(get_audio_duration(final_audio), MAX_DURATION_SECONDS)
+    duration_per_clip = max(narration_duration / len(clips), 2.0)
+
+    normalized = []
+    for index, clip in enumerate(clips):
+        norm_path = CLIPS_DIR / f"norm_{tmp_prefix}_{index:02d}.mp4"
+        normalize_clip(Path(clip["file"]), norm_path, duration_per_clip)
+        normalized.append(norm_path)
+
+    concatenated = CLIPS_DIR / f"concatenated_{tmp_prefix}.mp4"
+    concat_clips(normalized, concatenated, tmp_name=f"concat_list_{tmp_prefix}.txt")
+    add_audio_and_subtitles(concatenated, final_audio, subtitles, output_path)
+
+    return narration_duration
+
+
 def main():
-    required = [FETCHED_CLIPS_PATH, FINAL_AUDIO, SUBTITLES]
+    required = [FETCHED_CLIPS_PATH, EPISODE_PATH]
     for path in required:
         if not path.exists():
             sys.exit(f"❌ الملف غير موجود: {path}")
@@ -127,24 +180,53 @@ def main():
     if not clips:
         sys.exit("❌ fetched_clips.json فارغ.")
 
-    narration_duration = min(get_audio_duration(FINAL_AUDIO), MAX_DURATION_SECONDS)
-    duration_per_clip = max(narration_duration / len(clips), 2.0)
+    episode = json.loads(EPISODE_PATH.read_text(encoding="utf-8"))
+    parts = episode.get("parts")
+
+    # توافق مع الشكل القديم من current_episode.json لو مفيش "parts" فيه
+    # (يعني generate_voice.py القديم لسه شغال، أو ملف قديم).
+    if not parts:
+        parts = [{
+            "final_audio": str(CLIPS_DIR / "narration_with_music.mp3"),
+            "subtitles": str(CLIPS_DIR / "narration.srt"),
+        }]
+
+    for part in parts:
+        for key in ("final_audio", "subtitles"):
+            if not Path(part[key]).exists():
+                sys.exit(f"❌ الملف غير موجود: {part[key]}")
+
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    normalized = []
-    for index, clip in enumerate(clips):
-        output_path = CLIPS_DIR / f"norm_{index:02d}.mp4"
-        normalize_clip(Path(clip["file"]), output_path, duration_per_clip)
-        normalized.append(output_path)
+    if len(parts) == 1:
+        output_path = OUTPUT_DIR / "final_video.mp4"
+        duration = build_video_part(
+            clips,
+            Path(parts[0]["final_audio"]),
+            Path(parts[0]["subtitles"]),
+            output_path,
+            tmp_prefix="single",
+        )
+        print(f"✅ الفيديو النهائي: {output_path}")
+        print(f"✅ المدة: {duration:.1f} ثانية")
+    else:
+        # نوزّع المقاطع المتاحة على الأجزاء بنسبة مدة صوت كل جزء.
+        weights = [get_audio_duration(Path(part["final_audio"])) for part in parts]
+        clip_groups = split_clips_by_weight(clips, weights)
 
-    concatenated = CLIPS_DIR / "concatenated.mp4"
-    concat_clips(normalized, concatenated)
-    add_audio_and_subtitles(concatenated)
+        for index, (part, part_clips) in enumerate(zip(parts, clip_groups), 1):
+            output_path = OUTPUT_DIR / f"final_video_part{index}.mp4"
+            duration = build_video_part(
+                part_clips,
+                Path(part["final_audio"]),
+                Path(part["subtitles"]),
+                output_path,
+                tmp_prefix=f"part{index}",
+            )
+            print(f"✅ الجزء {index}: {output_path}")
+            print(f"✅ مدة الجزء {index}: {duration:.1f} ثانية")
 
-    print(f"✅ الفيديو النهائي: {FINAL_OUTPUT}")
-    print(f"✅ المدة: {narration_duration:.1f} ثانية")
-    print("✅ النص: FontSize=10، سطران، أعلى الشاشة")
-    print("✅ الصوت: narration_with_music.mp3")
+    print("✅ النص: FontSize=10، سطران كحد أقصى، أعلى الشاشة، في المنتصف")
     print("✅ الموسيقى مدمجة مسبقاً بنسبة 15%")
 
 
