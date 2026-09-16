@@ -1,17 +1,10 @@
 """
-publish_buffer.py
-ينشر الفيديو النهائي عبر Buffer GraphQL API إلى قناة أو عدة قنوات.
-
-GitHub Secrets المطلوبة:
-- BUFFER_API_KEY
-- BUFFER_CHANNEL_ID
-
-يمكن أن تكون BUFFER_CHANNEL_ID قيمة واحدة أو عدة قيم مفصولة بفواصل:
-6aaa8778ea19ca0bde57da16,6aaa8700ea19ca0bde57d3fc,6aaa853fea19ca0bde57b5f7
+publish_buffer.py - نشر فيديو إلى قنوات Buffer مع عنوان وهاشتاجات.
 """
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -20,58 +13,62 @@ import requests
 SCRIPT_DIR = Path(__file__).parent
 EPISODE_PATH = SCRIPT_DIR.parent / "state" / "current_episode.json"
 FINAL_VIDEO = SCRIPT_DIR.parent / "output" / "final_video.mp4"
-
 BUFFER_GRAPHQL_API = "https://api.buffer.com"
 GITHUB_API = "https://api.github.com"
 RELEASE_TAG = "media-assets"
 
+CHANNEL_SERVICES = {
+    "6aaa8778ea19ca0bde57da16": "youtube",
+    "6aaa8700ea19ca0bde57d3fc": "tiktok",
+    "6aaa853fea19ca0bde57b5f7": "facebook",
+}
+
 CREATE_POST_MUTATION = """
-mutation CreatePost($text: String!, $channelId: ChannelId!, $videoUrl: String!) {
+mutation CreatePost(
+  $text: String!
+  $channelId: ChannelId!
+  $videoUrl: String!
+  $metadata: PostInputMetaData
+) {
   createPost(
     input: {
       text: $text
       channelId: $channelId
       schedulingType: automatic
       mode: addToQueue
+      metadata: $metadata
       assets: [{ video: { url: $videoUrl } }]
     }
   ) {
-    ... on PostActionSuccess {
-      post {
-        id
-        text
-        dueAt
-      }
-    }
-    ... on MutationError {
-      message
-    }
+    ... on PostActionSuccess { post { id text dueAt } }
+    ... on MutationError { message }
   }
 }
 """
 
 
-def _get_or_create_release(repo: str, github_token: str) -> dict:
-    headers = {
-        "Authorization": f"Bearer {github_token}",
+def github_headers(token: str) -> dict:
+    return {
+        "Authorization": f"Bearer {token}",
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
 
+
+def get_or_create_release(repo: str, token: str) -> dict:
     response = requests.get(
         f"{GITHUB_API}/repos/{repo}/releases/tags/{RELEASE_TAG}",
-        headers=headers,
-        timeout=20,
+        headers=github_headers(token), timeout=20,
     )
     if response.status_code == 200:
         return response.json()
 
     response = requests.post(
         f"{GITHUB_API}/repos/{repo}/releases",
-        headers=headers,
+        headers=github_headers(token),
         json={
             "tag_name": RELEASE_TAG,
-            "name": "Media Assets (auto-hosted videos for Buffer)",
+            "name": "Media Assets",
             "body": "Temporary public hosting for Buffer video posts.",
             "prerelease": True,
         },
@@ -81,132 +78,141 @@ def _get_or_create_release(repo: str, github_token: str) -> dict:
     return response.json()
 
 
-def upload_media(video_path: Path, github_token: str) -> str:
-    repo = os.environ.get("GITHUB_REPOSITORY")
+def upload_media(video_path: Path, token: str) -> str:
+    repo = os.environ.get("MEDIA_REPOSITORY") or os.environ.get("GITHUB_REPOSITORY")
     if not repo:
-        raise RuntimeError("GITHUB_REPOSITORY is not available; run inside GitHub Actions.")
+        raise RuntimeError("MEDIA_REPOSITORY or GITHUB_REPOSITORY is missing.")
 
-    release = _get_or_create_release(repo, github_token)
+    release = get_or_create_release(repo, token)
     upload_url = release["upload_url"].split("{")[0]
     asset_name = f"video_{video_path.stem}_{os.environ.get('GITHUB_RUN_ID', 'local')}.mp4"
 
-    with video_path.open("rb") as video_file:
+    with video_path.open("rb") as file_handle:
         response = requests.post(
             upload_url,
-            headers={
-                "Authorization": f"Bearer {github_token}",
-                "Accept": "application/vnd.github+json",
-                "Content-Type": "video/mp4",
-                "X-GitHub-Api-Version": "2022-11-28",
-            },
-            params={"name": asset_name},
-            data=video_file,
-            timeout=180,
+            headers={**github_headers(token), "Content-Type": "video/mp4"},
+            params={"name": asset_name}, data=file_handle, timeout=180,
         )
-
     response.raise_for_status()
     return response.json()["browser_download_url"]
 
 
-def create_buffer_post(video_url: str, caption: str, channel_id: str, api_key: str) -> dict:
+def metadata_for(channel_id: str, title: str) -> dict | None:
+    service = CHANNEL_SERVICES.get(channel_id)
+    if service == "youtube":
+        return {"youtube": {
+            "title": title[:100] or "Horror Episode",
+            "categoryId": "24",
+            "privacy": "public",
+            "madeForKids": False,
+            "notifySubscribers": True,
+            "isAiGenerated": True,
+        }}
+    if service == "facebook":
+        return {"facebook": {"type": "reel", "title": title[:255]}}
+    if service == "tiktok":
+        return {"tiktok": {"isAiGenerated": True}}
+    return None
+
+
+def create_buffer_post(video_url: str, post_text: str, title: str, channel_id: str, api_key: str) -> dict:
     response = requests.post(
         BUFFER_GRAPHQL_API,
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-        },
-        json={
-            "query": CREATE_POST_MUTATION,
-            "variables": {
-                "text": caption,
-                "channelId": channel_id,
-                "videoUrl": video_url,
-            },
-        },
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
+        json={"query": CREATE_POST_MUTATION, "variables": {
+            "text": post_text,
+            "channelId": channel_id,
+            "videoUrl": video_url,
+            "metadata": metadata_for(channel_id, title),
+        }},
         timeout=30,
     )
     response.raise_for_status()
     data = response.json()
-
     if data.get("errors"):
-        raise RuntimeError(f"Buffer GraphQL error: {data['errors']}")
-
+        raise RuntimeError(str(data["errors"]))
     result = data.get("data", {}).get("createPost") or {}
     if result.get("message"):
-        raise RuntimeError(f"Buffer rejected channel {channel_id}: {result['message']}")
-
+        raise RuntimeError(result["message"])
     if not result.get("post"):
-        raise RuntimeError(f"Buffer returned no post for channel {channel_id}: {result}")
-
+        raise RuntimeError(f"No post returned: {result}")
     return result
 
 
-def parse_channel_ids(raw_value: str) -> list[str]:
-    # Accept comma-separated values and also tolerate newlines/semicolons.
-    normalized = raw_value.replace(";", ",").replace("\n", ",")
-    ids = [part.strip() for part in normalized.split(",") if part.strip()]
+def parse_channel_ids(raw: str) -> list[str]:
+    raw = raw.replace(";", ",").replace("\n", ",")
+    ids = [value.strip().strip("\"'") for value in raw.split(",") if value.strip()]
+    return list(dict.fromkeys(ids))
 
-    # Remove accidental surrounding quotes without exposing secrets in logs.
-    ids = [channel_id.strip('"\' ') for channel_id in ids]
-    ids = list(dict.fromkeys(ids))
 
-    if not ids:
-        raise RuntimeError("BUFFER_CHANNEL_ID is empty.")
+def build_post_text(caption: str, title: str) -> str:
+    """يحافظ على نص المنشور ويضمن وجود العنوان والهاشتاجات دون تكرار."""
+    caption = re.sub(r"^\s*=\s*", "", caption).strip()
+    title = re.sub(r"^\s*=\s*", "", title).strip()
 
-    return ids
+    hashtags = re.findall(r"(?<!\w)#\S+", caption)
+    hashtags = list(dict.fromkeys(hashtags))
+    hashtags_text = " ".join(hashtags)
+
+    parts = []
+    if title and title.casefold() not in caption.casefold():
+        parts.append(title)
+    if caption:
+        parts.append(caption)
+    if hashtags_text and hashtags_text not in caption:
+        parts.append(hashtags_text)
+
+    return "\n\n".join(parts).strip()
 
 
 def main() -> None:
     api_key = os.environ.get("BUFFER_API_KEY", "").strip()
-    raw_channel_ids = os.environ.get("BUFFER_CHANNEL_ID", "")
+    raw_ids = os.environ.get("BUFFER_CHANNEL_ID", "")
     github_token = os.environ.get("GITHUB_TOKEN", "").strip()
 
-    if not api_key:
-        sys.exit("Error: BUFFER_API_KEY is missing.")
-    if not raw_channel_ids.strip():
-        sys.exit("Error: BUFFER_CHANNEL_ID is missing.")
-    if not github_token:
-        sys.exit("Error: GITHUB_TOKEN is missing.")
+    if not api_key or not raw_ids.strip() or not github_token:
+        sys.exit("BUFFER_API_KEY, BUFFER_CHANNEL_ID and GITHUB_TOKEN are required.")
     if not FINAL_VIDEO.exists() or FINAL_VIDEO.stat().st_size == 0:
-        sys.exit("Error: output/final_video.mp4 is missing or empty.")
+        sys.exit("output/final_video.mp4 is missing or empty.")
     if not EPISODE_PATH.exists():
-        sys.exit("Error: state/current_episode.json is missing.")
+        sys.exit("state/current_episode.json is missing.")
 
-    channel_ids = parse_channel_ids(raw_channel_ids)
+    channel_ids = parse_channel_ids(raw_ids)
     episode = json.loads(EPISODE_PATH.read_text(encoding="utf-8"))
+    title = str(episode.get("title", "Horror Episode")).strip() or "Horror Episode"
     caption = str(episode.get("caption", "")).strip()
     if not caption:
-        sys.exit("Error: current_episode.json has no caption.")
+        sys.exit("current_episode.json has no caption.")
 
+    post_text = build_post_text(caption, title)
     print(f"Configured Buffer channels: {len(channel_ids)}")
-    print("Uploading video to a public GitHub Release URL...")
+    print(f"Post title loaded: {title[:80]}")
+    print(f"Hashtags detected: {len(re.findall(r'(?<!\\w)#\\S+', caption))}")
+
     video_url = upload_media(FINAL_VIDEO, github_token)
     print("Public video URL created successfully.")
 
-    successes = []
+    successes = 0
     failures = []
-
-    for index, channel_id in enumerate(channel_ids, start=1):
+    for number, channel_id in enumerate(channel_ids, 1):
+        service = CHANNEL_SERVICES.get(channel_id, "unknown")
         try:
-            print(f"Publishing channel {index}/{len(channel_ids)}...")
-            result = create_buffer_post(video_url, caption, channel_id, api_key)
-            post = result.get("post", {})
-            successes.append(channel_id)
-            print(f"Published channel {index}/{len(channel_ids)}; post id: {post.get('id', 'unknown')}")
+            print(f"Publishing channel {number}/{len(channel_ids)} ({service})...")
+            result = create_buffer_post(video_url, post_text, title, channel_id, api_key)
+            print(f"Published {service}; post id: {result['post'].get('id', 'unknown')}")
+            successes += 1
         except Exception as error:
-            failures.append((channel_id, str(error)))
-            print(f"Channel {index}/{len(channel_ids)} failed: {error}")
+            failures.append((service, str(error)))
+            print(f"Channel {number}/{len(channel_ids)} failed ({service}): {error}")
 
-    print(f"Successful Buffer posts: {len(successes)}/{len(channel_ids)}")
+    print(f"Successful Buffer posts: {successes}/{len(channel_ids)}")
+    for service, error in failures:
+        print(f"Failure summary ({service}): {error}")
 
-    if failures:
-        print(f"Failed Buffer posts: {len(failures)}")
-
-    if not successes:
+    if successes == 0:
         sys.exit("No Buffer channel was published successfully.")
-
     if failures:
-        print("Warning: at least one channel failed, but at least one post succeeded.")
+        print("Warning: some channels failed, but at least one post succeeded.")
 
 
 if __name__ == "__main__":
