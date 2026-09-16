@@ -185,9 +185,10 @@ def main() -> None:
         sys.exit("current_episode.json has no caption.")
 
     post_text = build_post_text(caption, title)
+    hashtag_count = len(re.findall(r"(?<!\w)#\S+", caption))
     print(f"Configured Buffer channels: {len(channel_ids)}")
     print(f"Post title loaded: {title[:80]}")
-    print(f"Hashtags detected: {len(re.findall(r'(?<!\\w)#\\S+', caption))}")
+    print(f"Hashtags detected: {hashtag_count}")
 
     video_url = upload_media(FINAL_VIDEO, github_token)
     print("Public video URL created successfully.")
