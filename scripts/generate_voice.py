@@ -113,18 +113,38 @@ async def synthesize_voice(text: str):
             elif chunk["type"] == "WordBoundary":
                 word_events.append(chunk)
 
-    if not word_events:
-        sys.exit("❌ Edge TTS لم يرجع توقيت الكلمات.")
-
-    subtitle_blocks = []
-    for index in range(0, len(word_events), WORDS_PER_CAPTION_CHUNK):
-        group = word_events[index:index + WORDS_PER_CAPTION_CHUNK]
-        start = group[0]["offset"] / 10_000_000
-        end = (
-            group[-1]["offset"] + group[-1]["duration"]
-        ) / 10_000_000
-        content = two_lines([event["text"] for event in group])
-        subtitle_blocks.append((start, max(end, start + 0.25), content))
+    if word_events:
+        subtitle_blocks = []
+        for index in range(0, len(word_events), WORDS_PER_CAPTION_CHUNK):
+            group = word_events[index:index + WORDS_PER_CAPTION_CHUNK]
+            start = group[0]["offset"] / 10_000_000
+            end = (
+                group[-1]["offset"] + group[-1]["duration"]
+            ) / 10_000_000
+            content = two_lines([event["text"] for event in group])
+            subtitle_blocks.append((start, max(end, start + 0.25), content))
+    else:
+        # بعض إصدارات/أصوات Edge TTS لا ترسل WordBoundary.
+        # نستخدم مدة ملف الصوت لتوليد SRT تقريبي بدلاً من إيقاف البناء.
+        print("⚠️ Edge TTS لم يرجع WordBoundary؛ سيتم استخدام توقيت تقريبي.")
+        probe = subprocess.run([
+            "ffprobe", "-v", "error", "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1", str(VOICE_AUDIO),
+        ], capture_output=True, text=True)
+        if probe.returncode != 0 or not probe.stdout.strip():
+            sys.exit("❌ تعذر قراءة مدة ملف الصوت لإنشاء الترجمة.")
+        audio_duration = float(probe.stdout.strip())
+        words = re.findall(r"\S+", text)
+        if not words:
+            sys.exit("❌ النص فارغ ولا يمكن إنشاء ترجمة.")
+        subtitle_blocks = []
+        total_groups = (len(words) + WORDS_PER_CAPTION_CHUNK - 1) // WORDS_PER_CAPTION_CHUNK
+        chunk_duration = audio_duration / total_groups
+        for index in range(0, len(words), WORDS_PER_CAPTION_CHUNK):
+            group = words[index:index + WORDS_PER_CAPTION_CHUNK]
+            start = (index // WORDS_PER_CAPTION_CHUNK) * chunk_duration
+            end = min(audio_duration, start + chunk_duration)
+            subtitle_blocks.append((start, max(end, start + 0.25), two_lines(group)))
 
     srt_lines = []
     for number, (start, end, content) in enumerate(subtitle_blocks, 1):
