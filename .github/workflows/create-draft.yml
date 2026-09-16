@@ -4,8 +4,9 @@ on:
   schedule:
     - cron: "0 13 * * *"   # الساعة 3 عصرًا بتوقيت القاهرة (UTC+2 ثابت)
     - cron: "0 17 * * *"   # الساعة 7 مساءً بتوقيت القاهرة (UTC+2 ثابت)
-  workflow_dispatch: {}     # للتشغيل اليدوي وقت الاختبار
-
+push:
+    branches: [ main ]
+  workflow_dispatch: # دي الخاصية المسؤولة عن إظهار زر التشغيل اليدوي
 permissions:
   contents: write
 
