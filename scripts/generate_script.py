@@ -43,8 +43,9 @@ def generate_episode() -> dict:
         user_message += (
             "\n\nالعناوين اللي اتستخدمت قبل كده (تجنب أي تشابه معاها):\n- "
             + "\n- ".join(recent_titles)
-            )
-            completion = client.chat.completions.create(
+        )
+
+    completion = client.chat.completions.create(
         model="openai/gpt-oss-120b",  # موديل مجاني قوي على Groq (بديل llama-3.3 بعد إيقافه)
         messages=[
             {"role": "system", "content": system_prompt},
@@ -55,6 +56,7 @@ def generate_episode() -> dict:
         reasoning_effort="low",  # نقلل التفكير الداخلي المخفي عشان التوكنز تروح للنص الفعلي
         response_format={"type": "json_object"},
     )
+
     raw = completion.choices[0].message.content
     episode = json.loads(raw)
 
