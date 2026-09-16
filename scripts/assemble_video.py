@@ -2,7 +2,7 @@
 assemble_video.py
 
 يجمع المقاطع مع الصوت النهائي الناتج من generate_voice.py، ويحرق
-الترجمة الصغيرة المتزامنة أعلى الشاشة أسفل منطقة الكاميرا الأمامية،
+نص العنوان الكبير Bold المتزامن أعلى الشاشة أسفل منطقة الكاميرا الأمامية،
 في المنتصف تماماً (مش يمين ولا شمال).
 
 الموسيقى مدمجة مسبقاً داخل ملف narration_with_music*.mp3، لذلك لا نخلطها هنا مرة أخرى.
@@ -34,14 +34,17 @@ TARGET_WIDTH = 1080
 TARGET_HEIGHT = 1920
 MAX_DURATION_SECONDS = 600
 
-# نص صغير (FontSize=10)، سطران كحد أقصى، أعلى الشاشة أسفل منطقة الكاميرا
-# الأمامية. Alignment=8 في libass = أعلى المنتصف (وليس يمين أو شمال)،
-# وده بيخلي كل سطر يتمركز لوحده في نص الشاشة أفقياً.
+# نص عنوان كبير وBold، سطران كحد أقصى، أعلى الشاشة أسفل منطقة الكاميرا
+# الأمامية، بنفس الإحساس اللي في صورة المرجع (خط أبيض سميك بحدّ أسود واضح).
+# Alignment=8 في libass = أعلى المنتصف (مش يمين ولا شمال)، وده بيخلي كل
+# سطر يتمركز لوحده في نص الشاشة أفقياً. MarginV بيحدد المسافة من أعلى
+# الشاشة لحد بداية النص (زوّدناها عشان يبقى تحت منطقة الكاميرا الأمامية
+# زي الصورة بالظبط، مش لاصق في الحافة).
 SUBTITLE_STYLE = (
-    "FontName=Arial,FontSize=10,Bold=0,"
-    "PrimaryColour=&H00FFFFFF,OutlineColour=&H99000000,"
-    "BorderStyle=1,Outline=2,Shadow=1,"
-    "Alignment=8,MarginL=70,MarginR=70,MarginV=45,"
+    "FontName=Arial,FontSize=56,Bold=1,"
+    "PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,"
+    "BorderStyle=1,Outline=3,Shadow=1,"
+    "Alignment=8,MarginL=60,MarginR=60,MarginV=160,"
     "WrapStyle=2,Spacing=0"
 )
 
@@ -226,7 +229,7 @@ def main():
             print(f"✅ الجزء {index}: {output_path}")
             print(f"✅ مدة الجزء {index}: {duration:.1f} ثانية")
 
-    print("✅ النص: FontSize=10، سطران كحد أقصى، أعلى الشاشة، في المنتصف")
+    print("✅ النص: FontSize=56 Bold، سطران كحد أقصى، أعلى الشاشة، في المنتصف")
     print("✅ الموسيقى مدمجة مسبقاً بنسبة 15%")
 
 
