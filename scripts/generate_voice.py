@@ -24,7 +24,11 @@ WORDS_PER_CAPTION_CHUNK = 2  # كام كلمة تظهر مع بعض في نفس 
 
 
 async def synthesize_with_timing(text: str, audio_path: Path, subs_path: Path):
-    communicate = edge_tts.Communicate(text, VOICE, rate=RATE, pitch=PITCH)
+    # مهم: من إصدار edge-tts 7.2.0، الإعداد الافتراضي بقى "SentenceBoundary"
+    # بدل "WordBoundary"، فلازم نحددها صراحة عشان نقدر نجمّع توقيت كل كلمة.
+    communicate = edge_tts.Communicate(
+        text, VOICE, rate=RATE, pitch=PITCH, boundary="WordBoundary"
+    )
 
     word_events = []
     with open(audio_path, "wb") as audio_file:
