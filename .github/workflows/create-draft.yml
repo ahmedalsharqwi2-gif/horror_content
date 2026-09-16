@@ -2,17 +2,19 @@ name: Create and Publish Horror Episode
 
 on:
   schedule:
-    - cron: "0 13 * * *"   # الساعة 3 عصرًا بتوقيت القاهرة (UTC+2 ثابت)
-    - cron: "0 17 * * *"   # الساعة 7 مساءً بتوقيت القاهرة (UTC+2 ثابت)
-push:
-    branches: [ main ]
-  workflow_dispatch: # دي الخاصية المسؤولة عن إظهار زر التشغيل اليدوي
+    - cron: "0 13 * * *" # 3 عصراً بتوقيت القاهرة عند UTC+2
+    - cron: "0 17 * * *" # 7 مساءً بتوقيت القاهرة عند UTC+2
+  push:
+    branches: [main]
+  workflow_dispatch:
+
 permissions:
   contents: write
 
 jobs:
   build-draft:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -48,7 +50,7 @@ jobs:
       - name: Assemble final video with burned captions (ffmpeg)
         run: python scripts/assemble_video.py
 
-            - name: Publish directly via Buffer
+      - name: Publish directly via Buffer
         env:
           BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
           BUFFER_CHANNEL_ID: ${{ secrets.BUFFER_CHANNEL_ID }}
