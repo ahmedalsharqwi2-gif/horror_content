@@ -1,9 +1,16 @@
+# === تعديل جديد مهم ===
+# كان فيه اتنين cron (13:00 و 17:00 UTC) — ده غلط لو هدفك نشر جزئين من
+# *نفس* الحلقة على الساعة 3 والساعة 7: التشغيل الثاني (17:00) كان هيولّد
+# حلقة كاملة جديدة تمامًا بدل ما يكمّل الحلقة اللي بدأت الساعة 3.
+# الحل: كرون واحد بس الساعة 13:00 UTC (= 3 عصرًا بتوقيت القاهرة UTC+2).
+# السكريبت بينشر الجزء الأول فورًا، وبيجدول الجزء الثاني عن طريق Buffer
+# نفسها (dueAt) بعد PART2_DELAY_HOURS ساعة (4 ساعات افتراضيًا = 7 مساءً).
+
 name: Create and Publish Horror Episode
 
 on:
   schedule:
-    - cron: "0 13 * * *" # 3 عصراً بتوقيت القاهرة عند UTC+2
-    - cron: "0 17 * * *" # 7 مساءً بتوقيت القاهرة عند UTC+2
+    - cron: "0 13 * * *" # 3 عصراً بتوقيت القاهرة عند UTC+2 — الجزء الأول ينشر فورًا، الجزء الثاني بيتجدول تلقائيًا الساعة 7 مساءً عن طريق Buffer
   push:
     branches: [main]
   workflow_dispatch:
@@ -55,11 +62,9 @@ jobs:
           BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
           BUFFER_CHANNEL_ID: ${{ secrets.BUFFER_CHANNEL_ID }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # الجزء التاني (لو الحلقة اتقسمت) بيتجدول بعد المدة دي بالساعات.
-          # 6 ساعات مختارة عمدًا عشان متتصادمش مع تشغيلة الـ cron الجاية
-          # (13:00 أو 17:00 UTC) — 4 أو 24 ساعة بتهبط بالظبط على تشغيلة
-          # تانية وبتعمل بوست مزدوج على نفس القناة في نفس اللحظة تقريبًا.
-          PART2_DELAY_HOURS: "6"
+          # الفرق بين نشر الجزء الأول (3 عصرًا، فوري) والجزء الثاني
+          # (يتجدول تلقائيًا) — 4 ساعات بالضبط = 7 مساءً بالتمام.
+          PART2_DELAY_HOURS: "4"
         run: python scripts/publish_buffer.py
 
       - name: Upload video as artifact (for your own records)
@@ -67,12 +72,9 @@ jobs:
         with:
           name: published-video
           # final_video.mp4 (حلقة واحدة) أو final_video_part1.mp4 +
-          # final_video_part2.mp4 (حلقة متقسمة) — الاسم الثابت القديم
-          # كان بيفوّت الأرشفة تمامًا في حالة التقسيم.
+          # final_video_part2.mp4 (حلقة متقسمة)
           path: output/final_video*.mp4
           retention-days: 14
-          # يفشل الخطوة بوضوح لو مفيش أي فيديو خالص، بدل ما يمر بصمت
-          # (warn) ونكتشف المشكلة بعد كام يوم بس.
           if-no-files-found: error
 
       - name: Commit updated clip-tracking state
