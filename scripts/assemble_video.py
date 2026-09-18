@@ -21,7 +21,7 @@ assemble_video.py
    generate_voice.py قدّر المدة بشكل مختلف قليلاً.
 2) SUBTITLE_STYLE بقت مطابقة تمامًا للقيم اللي حددتها:
    FontSize=8, Outline=1.5, Alignment=9 (أعلى-يمين، مش أعلى-منتصف زي
-   قبل كده), MarginV=260, MarginL=35, MarginR=45. لو عايز ترجع للنص
+   قبل كده), MarginV=100, MarginL=35, MarginR=45. لو عايز ترجع للنص
    الكبير أعلى-المنتصف زي أول نسخة، غيّر Alignment لـ8 وMarginL/R
    لقيمة متساوية وارفع FontSize وOutline زي ما كانوا.
 
