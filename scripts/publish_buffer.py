@@ -231,10 +231,11 @@ def metadata_for(channel_id: str, title: str) -> dict | None:
     if service == "facebook":
         return {"facebook": {"type": "reel"}}
     if service == "instagram":
-        # بنفس نمط فيسبوك: Reels على انستجرام بتحتاج نوع "reel".
-        # ⚠️ لو Buffer رجّع خطأ نوع الحقل هنا، راجع
-        # InstagramPostMetadataInput في توثيق Buffer GraphQL وعدّل الحقول.
-        return {"instagram": {"type": "reel"}}
+        # بنفس نمط فيسبوك: Reels على انستجرام بتحتاج نوع "reel"، بس Buffer
+        # رجّع خطأ إضافي بيطلب shouldShareToFeed (Boolean إلزامي) — بدونه
+        # الطلب بيترفض بـ "Field shouldShareToFeed ... was not provided".
+        # True = ينشر كـ Reel عادي يظهر في الفيد كمان (السلوك المعتاد).
+        return {"instagram": {"type": "reel", "shouldShareToFeed": True}}
     return None
 
 
