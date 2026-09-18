@@ -26,12 +26,12 @@ narration جاهز ويحوّله لصوت فقط.
 الملفات الناتجة (لو القصة اتعملت في ريلز واحد):
 - downloaded_clips/narration_voice.mp3
 - downloaded_clips/narration_with_music.mp3
-- downloaded_clips/narration.srt
+- downloaded_clips/narration.ass
 
 الملفات الناتجة (لو القصة اتقسمت جزئين):
 - downloaded_clips/narration_voice_part1.mp3 / narration_voice_part2.mp3
 - downloaded_clips/narration_with_music_part1.mp3 / narration_with_music_part2.mp3
-- downloaded_clips/narration_part1.srt / narration_part2.srt
+- downloaded_clips/narration_part1.ass / narration_part2.ass
 
 الموسيقى المطلوبة:
 - assets/background_music.mp3
@@ -100,7 +100,25 @@ PART_TWO_INTRO = (
 
 VOICE_AUDIO = CLIPS_DIR / "narration_voice.mp3"
 FINAL_AUDIO = CLIPS_DIR / "narration_with_music.mp3"
-SUBTITLES = CLIPS_DIR / "narration.srt"
+# .ass بدل .srt — الستايل والدقة بيتكتبوا جوه الملف نفسه (انظر
+# build_ass_subtitles تحت)، فمفيش حاجة تتحط بعد كده في assemble_video.py.
+SUBTITLES = CLIPS_DIR / "narration.ass"
+
+# لازم تتطابق بالظبط مع TARGET_WIDTH/TARGET_HEIGHT في assemble_video.py،
+# عشان PlayResX/PlayResY في الـ .ass يبقوا نفس دقة الفيديو الحقيقية.
+VIDEO_W = 1080
+VIDEO_H = 1920
+
+# الستايل ده منقول حرفيًا من ملف main.py اللي بعته (نفس الأرقام بالظبط):
+#   Fontsize=64   -> واضح على دقة 1080×1920 من غير ما يطغى على الشاشة
+#   Outline=3     -> حدّ أسود واضح حوالين النص الأبيض
+#   Alignment=8   -> أعلى-منتصف (7/8/9 = الصف العلوي، 8 = وسط أفقي)
+#   MarginL/R=60  -> متساويين عشان Alignment=8 يتمركز فعليًا في نص الفريم
+#   MarginV=260   -> المسافة من أعلى الفريم (بكسل حقيقي)، تحت نوتش الكاميرا
+SUBTITLE_STYLE_LINE = (
+    "Style: Caption,Arial,64,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,"
+    "1,0,0,0,100,100,0,0,1,3,0,8,60,60,260,1"
+)
 
 
 def run(command: list[str]):
@@ -173,12 +191,35 @@ def apply_light_diacritics(text: str) -> str:
     return _WORD_TOKEN_PATTERN.sub(replace, text)
 
 
-def srt_time(seconds: float) -> str:
-    milliseconds = max(0, int(round(seconds * 1000)))
-    hours, remainder = divmod(milliseconds, 3_600_000)
-    minutes, remainder = divmod(remainder, 60_000)
-    secs, millis = divmod(remainder, 1_000)
-    return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
+def ass_time(seconds: float) -> str:
+    """H:MM:SS.cc — صيغة توقيت ASS (سنتي ثانية مش ميلي ثانية زي SRT)."""
+    centiseconds = max(0, int(round(seconds * 100)))
+    hours, remainder = divmod(centiseconds, 360_000)
+    minutes, remainder = divmod(remainder, 6_000)
+    secs, cs = divmod(remainder, 100)
+    return f"{hours:d}:{minutes:02d}:{secs:02d}.{cs:02d}"
+
+
+def build_ass_header() -> str:
+    return (
+        "[Script Info]\n"
+        "ScriptType: v4.00+\n"
+        f"PlayResX: {VIDEO_W}\n"
+        f"PlayResY: {VIDEO_H}\n"
+        "WrapStyle: 2\n"
+        "ScaledBorderAndShadow: yes\n"
+        "\n"
+        "[V4+ Styles]\n"
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
+        "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, "
+        "ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
+        "Alignment, MarginL, MarginR, MarginV, Encoding\n"
+        f"{SUBTITLE_STYLE_LINE}\n"
+        "\n"
+        "[Events]\n"
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, "
+        "Effect, Text\n"
+    )
 
 
 RTL_MARK = "\u200F"  # Right-to-Left Mark: يفرض ترتيب الكلمات العربية صح
@@ -398,15 +439,13 @@ def synthesize_voice(voice_text: str, voice_audio: Path, subtitles: Path, work_p
         content = two_lines([event["text"] for event in group])
         subtitle_blocks.append((start, max(end, start + 0.25), content))
 
-    srt_lines = []
-    for number, (start, end, content) in enumerate(subtitle_blocks, 1):
-        srt_lines.extend([
-            str(number),
-            f"{srt_time(start)} --> {srt_time(end)}",
-            content,
-            "",
-        ])
-    subtitles.write_text("\n".join(srt_lines), encoding="utf-8")
+    dialogue_lines = []
+    for start, end, content in subtitle_blocks:
+        dialogue_lines.append(
+            f"Dialogue: 0,{ass_time(start)},{ass_time(end)},Caption,,0,0,0,,{content}"
+        )
+    ass_content = build_ass_header() + "\n".join(dialogue_lines) + "\n"
+    subtitles.write_text(ass_content, encoding="utf-8")
 
     for segment in segments:
         Path(segment["path"]).unlink(missing_ok=True)
@@ -442,7 +481,7 @@ def process_part(clean_text: str, suffix: str) -> dict:
     voice_text (بتشكيل خفيف لكلمات صعبة) فقط للاستخدام الداخلي في TTS."""
     voice_audio = CLIPS_DIR / f"narration_voice{suffix}.mp3"
     final_audio = CLIPS_DIR / f"narration_with_music{suffix}.mp3"
-    subtitles = CLIPS_DIR / f"narration{suffix}.srt"
+    subtitles = CLIPS_DIR / f"narration{suffix}.ass"
 
     voice_text = apply_light_diacritics(clean_text)
     synthesize_voice(voice_text, voice_audio, subtitles, work_prefix=suffix.strip("_") or "single")
