@@ -2,14 +2,26 @@
 generate_voice.py
 
 يحوّل narration إلى صوت عربي باستخدام edge-tts، مع دعم:
-1) بدون أي تشكيل مضاف على النص (اتلغى بناءً على طلبك لأنه كان غير مظبوط).
-2) ترجمة SRT متزامنة مع توقيت الكلمات.
-3) خلط موسيقى الرعب داخل ملف صوت واحد بنسبة 15%.
-4) نهاية "هوك" قوية ومتنوعة تضمن اكتمال القصة بشكل شيّق ومناسب للترند.
-5) تقسيم تلقائي للقصة إلى جزئين (ريلز) لو كانت طويلة عن حد الريلز الواحد،
-   مع تنويه واضح في نهاية الجزء الأول (كليف هانجر) وبداية الجزء الثاني (استكمال).
-6) سكتات حقيقية بين الجمل أثناء الرواية (مش مجرد فاصلة في النص) لتحقيق
+1) نص التوليّد الأساسي (والترجمة/الكابشن) بدون أي تشكيل تمامًا — عشان
+   الرسم على الشاشة ميحصل فيه مشاكل (تفكك حروف/رموز غريبة).
+2) *جديد*: تشكيل خفيف جداً يُضاف فقط للكلمات الصعبة النطق (من قاموس صغير
+   قابل للتوسعة تحت)، ويُستخدم فقط في النص المُرسل لمحرك الصوت (TTS)
+   عشان يحسّن نُطق edge-tts لهذه الكلمات بالذات — بينما الترجمة (SRT)
+   والكابشن يفضلوا تمامًا بدون تشكيل زي ما طلبت، لأن التشكيل ده مالوش
+   لازمة بصرية وبيسبب مشاكل رسم.
+3) ترجمة SRT متزامنة مع توقيت الكلمات.
+4) خلط موسيقى الرعب داخل ملف صوت واحد بنسبة 15%.
+5) نهاية "هوك" قوية ومتنوعة تضمن اكتمال القصة بشكل شيّق ومناسب للترند.
+6) تقسيم تلقائي للقصة إلى جزئين (ريلز) بحد أقصى 90 ثانية (دقيقة ونصف)
+   لكل جزء عشان يصلح لريلز فيسبوك/انستجرام، مع تنويه واضح في نهاية الجزء
+   الأول (كليف هانجر) وبداية الجزء الثاني (استكمال).
+7) سكتات حقيقية بين الجمل أثناء الرواية (مش مجرد فاصلة في النص) لتحقيق
    إحساس رعب وتشويق فعلي، بمدد مختلفة حسب نوع نهاية الجملة (نقطة/سؤال/تعجب/...).
+
+⚠️ ملاحظة عن اللهجة: التزام النص بالفصحى (وعدم استخدام العامية) بيتحكم
+فيه على مستوى توليد النص نفسه في generate_script.py (والـ system prompt
+في prompts/horror_system_prompt.md)، مش في هذا الملف — هذا الملف بياخد
+narration جاهز ويحوّله لصوت فقط.
 
 الملفات الناتجة (لو القصة اتعملت في ريلز واحد):
 - downloaded_clips/narration_voice.mp3
@@ -23,11 +35,6 @@ generate_voice.py
 
 الموسيقى المطلوبة:
 - assets/background_music.mp3
-
-ملاحظة مهمة: السكريبت ده بياخد نص القصة (narration) جاهز من
-state/current_episode.json. توليد نص القصة نفسه (اللي حاليًا بيبقى "هبل"
-على حد وصفك) مش جزء من السكريبت ده ولا من assemble_video.py - لو عايز
-تحسين جودة/واقعية القصص، ابعتلي السكريبت اللي بيكتب narration وهساعدك فيه.
 """
 
 import asyncio
@@ -50,12 +57,7 @@ EPISODE_PATH = STATE_DIR / "current_episode.json"
 BACKGROUND_MUSIC = ASSETS_DIR / "background_music.mp3"
 
 # ---------------------------------------------------------------------------
-# إعدادات الصوت: إيقاع أبطأ وطبقة صوت أعمق قليلاً لإحساس رعب أكبر.
-# ملاحظة صادقة: أصوات edge-tts العربية (زي ar-EG-ShakirNeural) لسه مبتدعمش
-# وسوم "style" العاطفية (زي cheerful/sad/terrified) المتاحة في بعض الأصوات
-# الإنجليزية. يعني أقصى تحكم متاح فعليًا هو rate و pitch و volume + السكتات
-# الحقيقية بين الجمل اللي بنضيفها دلوقتي تحت (ده اللي فعليًا بيفرق في
-# إحساس الرعب أكتر من أي إعداد تاني).
+# إعدادات الصوت
 # ---------------------------------------------------------------------------
 VOICE = "ar-EG-ShakirNeural"
 RATE = "-15%"
@@ -64,45 +66,36 @@ VOLUME = "+0%"
 
 MUSIC_VOLUME = 0.15
 
-# قللنا عدد الكلمات في الكابشن الواحد عشان يبقى مناسب لحجم الخط الكبير
-# (FontSize=56 Bold) في assemble_video.py من غير ما يحصل تكدّس أو تجاوز
-# للشاشة.
 WORDS_PER_CAPTION_CHUNK = 4
 
-# متوسط تقديري لعدد الكلمات في الثانية بعد تبطيء الإيقاع (RATE أعلاه)،
-# يُستخدم فقط لتقدير مدة القصة قبل التوليد الفعلي، لتحديد هل نقسمها جزئين أو لا.
 AVG_WORDS_PER_SECOND = 2.1
 
 # أقصى مدة مقترحة للريلز الواحد (بالثانية) قبل ما نلجأ للتقسيم لجزئين.
-MAX_SINGLE_REEL_SECONDS = 75
+# ريلز فيسبوك/انستجرام أقصاه دقيقة ونصف (90 ثانية) — بنستخدم 80 هنا كهامش
+# أمان، والحد الفاصل النهائي (الصلب) موجود في assemble_video.py أيضاً.
+MAX_SINGLE_REEL_SECONDS = 80
 
-# مدد السكتات الحقيقية (بالثانية) بين الجمل، حسب نوع نهاية الجملة.
-# دي سكتات فعلية في ملف الصوت نفسه (مش مجرد علامة ترقيم)، وده اللي بيدي
-# إحساس الترقّب والرعب أثناء الرواية.
-PAUSE_AFTER_ELLIPSIS = 1.3   # بعد "..." أو "…" -> سكتة طويلة للتشويق
-PAUSE_AFTER_QUESTION_EXCLAIM = 0.75  # بعد "؟" أو "!"
-PAUSE_AFTER_PERIOD = 0.45    # بعد "."
+# سكتات حقيقية بين الجمل
+PAUSE_AFTER_ELLIPSIS = 1.3
+PAUSE_AFTER_QUESTION_EXCLAIM = 0.75
+PAUSE_AFTER_PERIOD = 0.45
 DEFAULT_PAUSE = 0.5
 
-# نهايات "هوك" متنوعة تضمن اكتمال القصة بشكل شيّق ومناسب للترند،
-# بيتم اختيار واحدة عشوائياً في كل مرة عشان النهاية متتكررش بنفس الشكل.
 HOOK_ENDINGS = [
     "وهنا تنتهي القصة... لكن هل كنت ستفتح الباب لو كنت مكانه؟",
-    "والسؤال اللي هيفضل عالق في دماغك: هل كنت هتكمل ولا هتهرب؟",
-    "لحد دلوقتي محدش عارف حقيقة اللي حصل... إيه رأيك انت في اللي حصل؟",
-    "والقصة خلصت هنا... بس هل تصدق إن ده كان مجرد صدفة؟",
+    "والسؤال الذي سيبقى عالقًا في ذهنك: هل كنت ستكمل أم ستهرب؟",
+    "حتى الآن لا أحد يعرف حقيقة ما حدث... فما رأيك أنت فيما جرى؟",
+    "والقصة انتهت هنا... فهل تصدق أن هذا كان مجرد صدفة؟",
 ]
 
-# تنويه نهاية الجزء الأول عند التقسيم (كليف هانجر + دعوة صريحة لمتابعة الجزء الثاني).
 PART_ONE_CLIFFHANGER = (
-    "وفجأة توقف كل حاجة عند اللحظة دي بالظبط... "
-    "تابعوني في الجزء القادم عشان تعرفوا اللي حصل بعد كده."
+    "وفجأة توقف كل شيء عند هذه اللحظة بالضبط... "
+    "تابعونا في الجزء القادم لتعرفوا ما حدث بعد ذلك."
 )
 
-# مقدمة الجزء الثاني عند التقسيم (تنويه واضح إن ده استكمال للجزء الأول).
 PART_TWO_INTRO = (
-    "لو لسه ما شفتش الجزء الأول من القصة، شوفه الأول عشان تفهم كل حاجة، "
-    "وبعدين نكمل مع بعض من هنا."
+    "إن لم تكونوا قد شاهدتم الجزء الأول من القصة، فشاهدوه أولًا لتفهموا كل "
+    "شيء، وبعد ذلك نكمل معًا من هنا."
 )
 
 VOICE_AUDIO = CLIPS_DIR / "narration_voice.mp3"
@@ -123,21 +116,61 @@ def run(command: list[str]):
 
 
 # حركات التشكيل العربي (فتحة/ضمة/كسرة/سكون/شدة/تنوين...) في نطاق يونيكود.
-# بنشيلها هنا كشبكة أمان إضافية، حتى لو ملف البرومبت اتغيّر أو الموديل
-# تجاهل تعليمة "بدون تشكيل" وحط حركات في الرد.
 ARABIC_DIACRITICS_PATTERN = re.compile(
     r"[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED\u08D3-\u08E1\u08E3-\u08FF]"
 )
 
 
+def strip_diacritics(text: str) -> str:
+    return ARABIC_DIACRITICS_PATTERN.sub("", text)
+
+
 def normalize_text(text: str) -> str:
     """
-    بدون أي تشكيل مضاف أو موجود - التشكيل اتلغى بالكامل بناءً على طلبك لأن
-    الناتج كان غير مظبوط. الدالة دي بتشيل أي حركات تشكيل موجودة أصلاً في
-    النص (زي شبكة أمان)، وبعدين بتنضف المسافات الزيادة.
+    بدون أي تشكيل مضاف أو موجود على الإطلاق. يُستخدم لبناء النص "النظيف"
+    الأساسي (اللي منه بنبني الترجمة/الكابشن)، وأي تشكيل خفيف للنطق
+    بيتضاف بعد كده فقط على نسخة منفصلة خاصة بالصوت (انظر
+    apply_light_diacritics تحت).
     """
-    text = ARABIC_DIACRITICS_PATTERN.sub("", text)
+    text = strip_diacritics(text)
     return re.sub(r"\s+", " ", text).strip()
+
+
+# ---------------------------------------------------------------------------
+# تشكيل خفيف لكلمات صعبة النطق (خاص بالصوت فقط، مش بالترجمة/الكابشن)
+# ---------------------------------------------------------------------------
+# قاموس صغير قابل للتوسعة: المفتاح هو الكلمة بدون تشكيل (لازم تطابق شكل
+# الكلمة في النص بعد normalize_text تمامًا)، والقيمة هي نفس الكلمة
+# بتشكيل جزئي يوضّح النطق الصحيح فقط عند الالتباس (مش تشكيل كامل).
+# وسّع القاموس ده بأي كلمة لاحظت إن edge-tts بينطقها غلط في حلقاتك.
+HARD_WORDS_DIACRITICS: dict[str, str] = {
+    "عدة": "عِدّة",
+    "قلبه": "قَلْبه",
+    "لعنة": "لَعنة",
+    "مسكون": "مَسكون",
+    "جثة": "جُثّة",
+    "همس": "هَمْس",
+    "أشباح": "أَشباح",
+    "ظل": "ظِلّ",
+    "رعب": "رُعب",
+    "صرخة": "صَرخة",
+}
+
+_WORD_TOKEN_PATTERN = re.compile(r"[\w\u0600-\u06FF]+", re.UNICODE)
+
+
+def apply_light_diacritics(text: str) -> str:
+    """
+    يرجّع نسخة من النص (المفروض تكون داخلة نظيفة بدون تشكيل) بعد إضافة
+    تشكيل خفيف فقط للكلمات الموجودة في HARD_WORDS_DIACRITICS، مع الحفاظ
+    على باقي النص وعلامات الترقيم كما هي. تُستخدم هذه النسخة في توليد
+    الصوت فقط (TTS)، ولا تُستخدم أبدًا في بناء الترجمة أو الكابشن.
+    """
+    def replace(match: re.Match) -> str:
+        word = match.group(0)
+        return HARD_WORDS_DIACRITICS.get(word, word)
+
+    return _WORD_TOKEN_PATTERN.sub(replace, text)
 
 
 def srt_time(seconds: float) -> str:
@@ -149,11 +182,6 @@ def srt_time(seconds: float) -> str:
 
 
 def two_lines(words: list[str]) -> str:
-    """
-    يقسّم مجموعة الكلمات على سطرين متوازنين قدر الإمكان.
-    \\N يفهمها libass كسطر جديد، وكل سطر بيتمركز لوحده في المنتصف
-    (Alignment=8 في ملف الترجمة في assemble_video.py) مش يمين ولا شمال.
-    """
     words = [word.strip() for word in words if word.strip()]
     if len(words) <= 2:
         return " ".join(words)
@@ -179,12 +207,11 @@ def pause_duration_for(sentence: str) -> float:
 
 def build_final_narration(raw_narration: str) -> list[str]:
     """
-    يجهز نص/نصوص القصة النهائية:
-    - لو القصة قصيرة بما يكفي لريلز واحد -> يرجّع عنصر واحد بس، ينتهي
-      بهوك قوي، وده اللي بيضمن إن القصة "تخلص" فعلاً في نفس الريلز.
-    - لو القصة طويلة -> يرجّع عنصرين: جزء أول ينتهي بكليف هانجر + تنويه
-      صريح إن فيه جزء تاني، وجزء ثاني يبدأ بتنويه استكمال وينتهي بالهوك
-      النهائي. كده القصة بتخلص فعلياً، بس على ريلزين بدل ريلز واحد مقطوع.
+    يجهز نص/نصوص القصة النهائية (نسخة نظيفة بدون تشكيل):
+    - لو القصة قصيرة بما يكفي لريلز واحد (≤ MAX_SINGLE_REEL_SECONDS)
+      -> يرجّع عنصر واحد بس، ينتهي بهوك قوي.
+    - لو القصة طويلة -> يرجّع عنصرين، كل واحد منهم بحجم يقارب نصف القصة
+      عشان يفضل الجزء الواحد جوه حد الـ 90 ثانية بتاع الريلز.
     """
     text = raw_narration.strip()
     if not text.endswith((".", "؟", "!", "…")):
@@ -249,9 +276,9 @@ def build_silence_clip(duration: float, path: Path):
 
 async def synthesize_sentences(sentences: list[str], work_prefix: str) -> list[dict]:
     """
-    بيولّد كل جملة في القصة كملف صوت منفصل، وبعد كل جملة (غير الأخيرة)
-    بيولّد ملف سكتة حقيقي بمدة تناسب نوع نهاية الجملة. ده اللي بيحقق
-    سكتات فعلية أثناء الرواية بدل الاعتماد على علامات الترقيم بس.
+    كل جملة هنا مفروض تكون داخلة ومعاها التشكيل الخفيف (لو الكلمة موجودة
+    في القاموس) — ده اللي بيتبعت فعليًا لـ edge-tts. الترجمة بعدين بتشيل
+    أي تشكيل من نص الأحداث (WordBoundary) قبل ما تظهر على الشاشة.
     """
     segments = []
     for index, sentence in enumerate(sentences):
@@ -291,15 +318,19 @@ async def synthesize_sentences(sentences: list[str], work_prefix: str) -> list[d
     return segments
 
 
-def synthesize_voice(text: str, voice_audio: Path, subtitles: Path, work_prefix: str):
-    sentences = split_sentences(text)
+def synthesize_voice(voice_text: str, voice_audio: Path, subtitles: Path, work_prefix: str):
+    """
+    voice_text: النص المُرسل فعليًا للصوت — قد يحتوي تشكيلًا خفيفًا على
+    كلمات صعبة (من apply_light_diacritics). الترجمة الناتجة (subtitles)
+    بتُبنى دايمًا من نص الأحداث بعد تجريده من أي تشكيل (strip_diacritics)،
+    فتفضل الترجمة نظيفة 100% زي ما طلبت.
+    """
+    sentences = split_sentences(voice_text)
     if not sentences:
         sys.exit("❌ النص فارغ ولا يمكن إنشاء صوت.")
 
     segments = asyncio.run(synthesize_sentences(sentences, work_prefix))
 
-    # دمج كل المقاطع (صوت + سكتات) في ملف صوت واحد متصل، عشان السكتات
-    # تتحس فعلياً أثناء رواية القصة.
     inputs = []
     for segment in segments:
         inputs += ["-i", str(segment["path"])]
@@ -315,7 +346,6 @@ def synthesize_voice(text: str, voice_audio: Path, subtitles: Path, work_prefix:
         str(voice_audio),
     ])
 
-    # بناء توقيت الترجمة على تايم لاين الملف المدموج بالكامل (صوت + سكتات).
     all_word_events = []
     cumulative_seconds = 0.0
     for segment in segments:
@@ -328,11 +358,10 @@ def synthesize_voice(text: str, voice_audio: Path, subtitles: Path, work_prefix:
                 all_word_events.append({
                     "offset": event["offset"] + int(cumulative_seconds * 10_000_000),
                     "duration": event["duration"],
-                    "text": event["text"],
+                    # نجرّد التشكيل الخفيف فورًا هنا عشان الترجمة تفضل نظيفة.
+                    "text": strip_diacritics(event["text"]),
                 })
         else:
-            # بعض إصدارات/أصوات Edge TTS لا ترسل WordBoundary لجملة معينة.
-            # نوزّع توقيت تقريبي على كلمات الجملة دي فقط، باستخدام مدتها الفعلية.
             print("⚠️ Edge TTS لم يرجع WordBoundary لجملة؛ سيتم استخدام توقيت تقريبي لها.")
             words = re.findall(r"\S+", segment["sentence"] or "")
             if words:
@@ -341,7 +370,7 @@ def synthesize_voice(text: str, voice_audio: Path, subtitles: Path, work_prefix:
                     all_word_events.append({
                         "offset": int((cumulative_seconds + word_index * per_word) * 10_000_000),
                         "duration": int(per_word * 10_000_000),
-                        "text": word,
+                        "text": strip_diacritics(word),
                     })
 
         cumulative_seconds += segment["duration"]
@@ -372,7 +401,6 @@ def synthesize_voice(text: str, voice_audio: Path, subtitles: Path, work_prefix:
 
 
 def mix_music_into_voice(voice_audio: Path, final_audio: Path):
-    """ينتج ملفاً واحداً يحتوي على الصوت والموسيقى بنسبة 15%."""
     if not BACKGROUND_MUSIC.exists():
         print("⚠️ background_music.mp3 غير موجود؛ سيتم نسخ الصوت بدون موسيقى.")
         run([
@@ -397,16 +425,19 @@ def mix_music_into_voice(voice_audio: Path, final_audio: Path):
     ])
 
 
-def process_part(text: str, suffix: str) -> dict:
+def process_part(clean_text: str, suffix: str) -> dict:
+    """clean_text: النص بدون أي تشكيل (المصدر الوحيد للحقيقة). يُبنى منه
+    voice_text (بتشكيل خفيف لكلمات صعبة) فقط للاستخدام الداخلي في TTS."""
     voice_audio = CLIPS_DIR / f"narration_voice{suffix}.mp3"
     final_audio = CLIPS_DIR / f"narration_with_music{suffix}.mp3"
     subtitles = CLIPS_DIR / f"narration{suffix}.srt"
 
-    synthesize_voice(text, voice_audio, subtitles, work_prefix=suffix.strip("_") or "single")
+    voice_text = apply_light_diacritics(clean_text)
+    synthesize_voice(voice_text, voice_audio, subtitles, work_prefix=suffix.strip("_") or "single")
     mix_music_into_voice(voice_audio, final_audio)
 
     return {
-        "text": text,
+        "text": clean_text,
         "voice_audio": str(voice_audio),
         "final_audio": str(final_audio),
         "subtitles": str(subtitles),
@@ -443,7 +474,7 @@ def main():
             print(f"✅ الجزء {index}: {result['final_audio']}")
         episode["narration"] = "\n\n---\n\n".join(parts_text)
         episode["parts"] = results
-        print("⚠️ القصة طويلة عن حد الريلز الواحد، تم تقسيمها إلى جزئين (part1 / part2)")
+        print("⚠️ القصة طويلة عن حد الريلز الواحد (90 ثانية)، تم تقسيمها إلى جزئين")
         print("✅ تم إضافة تنويه استكمال في نهاية الجزء الأول وبداية الجزء الثاني.")
 
     EPISODE_PATH.write_text(
@@ -452,7 +483,7 @@ def main():
     )
 
     print(f"✅ مستوى الموسيقى: {int(MUSIC_VOLUME * 100)}%")
-    print("✅ تم إلغاء التشكيل بالكامل من النص")
+    print("✅ التشكيل مُزال بالكامل من الترجمة/الكابشن، ومُضاف بشكل خفيف فقط في صوت الكلمات الصعبة")
     print("✅ تم إضافة سكتات حقيقية بين الجمل داخل ملف الصوت")
 
 
