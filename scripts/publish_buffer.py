@@ -382,12 +382,27 @@ def main() -> None:
     raw_ids = os.environ.get("BUFFER_CHANNEL_ID", "")
     github_token = os.environ.get("GITHUB_TOKEN", "").strip()
 
-    if not api_key or not raw_ids.strip() or not github_token:
-        sys.exit("BUFFER_API_KEY, BUFFER_CHANNEL_ID and GITHUB_TOKEN are required.")
+    if not api_key or not github_token:
+        sys.exit("BUFFER_API_KEY and GITHUB_TOKEN are required.")
     if not EPISODE_PATH.exists():
         sys.exit("state/current_episode.json is missing.")
 
-    channel_ids = parse_channel_ids(raw_ids)
+    # لو BUFFER_CHANNEL_ID فاضي، بنبني قائمة القنوات تلقائيًا من نفس
+    # المعرّفات اللي في BUFFER_YOUTUBE_CHANNEL_ID / FACEBOOK / INSTAGRAM
+    # (اللي بنيت منها CHANNEL_SERVICES فوق) — كده مش لازم تكرر نفس
+    # المعرّفات في Secret تاني، وده اللي سبب الخطأ "BUFFER_CHANNEL_ID ...
+    # are required" لما الـ Secret بقى فاضي.
+    if raw_ids.strip():
+        channel_ids = parse_channel_ids(raw_ids)
+    else:
+        channel_ids = list(CHANNEL_SERVICES.keys())
+        if not channel_ids:
+            sys.exit(
+                "لا يوجد أي قناة: لازم BUFFER_CHANNEL_ID أو واحد على الأقل من "
+                "BUFFER_YOUTUBE_CHANNEL_ID / BUFFER_FACEBOOK_CHANNEL_ID / "
+                "BUFFER_INSTAGRAM_CHANNEL_ID يكون معرّف."
+            )
+        print(f"ℹ️ BUFFER_CHANNEL_ID فاضي — استخدمنا القنوات من الـ Secrets المنفصلة: {channel_ids}")
 
     # تحذير مبكر واضح بدل ما نكتشف المشكلة بعد رفع الفيديو ومحاولة النشر:
     # أي قناة في BUFFER_CHANNEL_ID مالهاش خدمة معروفة (يعني مش موجودة في
