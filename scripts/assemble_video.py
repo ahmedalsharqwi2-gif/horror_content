@@ -15,20 +15,17 @@ assemble_video.py
 ولو جزء واحد بس (الوضع الافتراضي)، هنولد:
 - output/final_video.mp4
 
-=== تعديلات جديدة ===
-1) MAX_DURATION_SECONDS نزلت من 600 لـ 90 ثانية (دقيقة ونصف) — ده الحد
-   الصلب النهائي لكل جزء عشان يصلح فعليًا لريلز فيسبوك/انستجرام، حتى لو
-   generate_voice.py قدّر المدة بشكل مختلف قليلاً.
-2) SUBTITLE_STYLE بقت مطابقة تمامًا للقيم اللي حددتها:
-   FontSize=8, Outline=1.5, Alignment=9 (أعلى-يمين، مش أعلى-منتصف زي
-   قبل كده), MarginV=100, MarginL=35, MarginR=45. لو عايز ترجع للنص
-   الكبير أعلى-المنتصف زي أول نسخة، غيّر Alignment لـ8 وMarginL/R
-   لقيمة متساوية وارفع FontSize وOutline زي ما كانوا.
+=== تعديل جديد مهم: .ass بدل SRT+force_style ===
+كان النص بيتحرق قبل كده بتحويل SRT لـ ASS تلقائيًا جوه فلتر ffmpeg مع
+force_style فوقه، وده كان ممكن يسبب انزياح في الموضع الفعلي حسب دقة/إصدار
+ffmpeg المستخدم. دلوقتي generate_voice.py بيكتب ملف .ass كامل بنفسه —
+فيه [Script Info] بـ PlayResX/PlayResY = نفس دقة الفيديو الحقيقية بالظبط،
+والستايل (الخط، الحجم، المحاذاة، الهوامش) مكتوب جوه [V4+ Styles] نفسه.
+هنا بنستدعي الفلتر بـ subtitles='ملف.ass' من غير force_style خالص، عشان
+مصدر الحقيقة الوحيد لشكل وموضع النص يبقى الملف نفسه.
 
-=== مكان وحجم النص (Alignment/MarginV/FontSize) ===
-Alignment=9 يثبّت النص أعلى-يمين الفريم (جوه الهامش MarginR=45)،
-MarginV=260 يبعّده عن حافة الشاشة العليا، وWrapStyle=2 بيحدد أقصى سطرين.
-القيم دي مضبوطة على فريم رأسي 1080×1920.
+MAX_DURATION_SECONDS نزلت من 600 لـ 90 ثانية (دقيقة ونصف) — ده الحد
+الصلب النهائي لكل جزء عشان يصلح فعليًا لريلز فيسبوك/انستجرام.
 """
 
 import json
@@ -51,25 +48,6 @@ TARGET_HEIGHT = 1920
 # الحد الصلب النهائي لمدة أي جزء (بالثانية) — دقيقة ونصف، مناسب لريلز
 # فيسبوك/انستجرام. أي جزء أطول من كده هيُقصّ عند هذا الحد.
 MAX_DURATION_SECONDS = 90
-
-# نص عنوان كبير وBold، سطران كحد أقصى، أعلى الشاشة أسفل منطقة الكاميرا
-# الأمامية، بنفس الإحساس اللي في صورة المرجع (خط أبيض سميك بحدّ أسود واضح).
-#   Alignment=8   -> يثبّت الكتلة أعلى-منتصف (7/8/9 = الصف العلوي،
-#                    8 = وسط أفقيًا جوه الهوامش)
-#   MarginV=260   -> المسافة من أعلى الفريم بالبكسل الحقيقي (لأن
-#                    PlayResY == TARGET_HEIGHT)، تحت منطقة الكاميرا الأمامية براحة
-#   MarginL/R=60  -> متماثلة عشان Alignment=8 يتمركز على منتصف الفريم
-#                    الحقيقي مش بوكس مايل
-#   FontSize=64   -> واضح على المقاس ده من غير ما يطغى على الشاشة
-#   Outline=5, Shadow=0, BorderStyle=1 -> نص أبيض حاد بحدّ أسود سميك،
-#                    من غير ظل منفصل
-SUBTITLE_STYLE = (
-    "FontName=Arial,FontSize=8,Bold=1,"
-    "PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,"
-    "BorderStyle=1,Outline=1.5,Shadow=0,"
-    "Alignment=9,MarginV=260,MarginL=35,MarginR=45,"
-    "WrapStyle=2"
-)
 
 
 def run(command: list[str]):
@@ -131,7 +109,12 @@ def concat_clips(paths: list[Path], output_path: Path, tmp_name: str):
 
 
 def add_audio_and_subtitles(video_path: Path, final_audio: Path, subtitles: Path, output_path: Path):
-    subtitle_filter = f"subtitles={subtitles}:force_style='{SUBTITLE_STYLE}'"
+    # الستايل والدقة (PlayResX/PlayResY) مكتوبين جوه ملف الـ .ass نفسه
+    # (شوف generate_voice.py) — مفيش force_style هنا خالص، عشان مفيش
+    # مصدرين للحقيقة يتعارضوا. بنعمل escape للـ ":" في المسار زي ما
+    # فلتر subtitles بتاع ffmpeg بيتطلب.
+    subtitle_path = str(subtitles).replace("\\", "/").replace(":", "\\:")
+    subtitle_filter = f"subtitles='{subtitle_path}'"
     run([
         "ffmpeg", "-y",
         "-i", str(video_path),
@@ -209,7 +192,7 @@ def main():
     if not parts:
         parts = [{
             "final_audio": str(CLIPS_DIR / "narration_with_music.mp3"),
-            "subtitles": str(CLIPS_DIR / "narration.srt"),
+            "subtitles": str(CLIPS_DIR / "narration.ass"),
         }]
 
     for part in parts:
@@ -246,7 +229,7 @@ def main():
             print(f"✅ الجزء {index}: {output_path}")
             print(f"✅ مدة الجزء {index}: {duration:.1f} ثانية (حد أقصى {MAX_DURATION_SECONDS}s)")
 
-    print("✅ النص: FontSize=8 Bold، سطران كحد أقصى، أعلى الشاشة (MarginV=260)، أعلى-يمين (Alignment=9)، Outline=1.5")
+    print("✅ النص: الستايل مكتوب جوه ملف .ass نفسه (Fontsize=64, Alignment=8, MarginL=60, MarginR=60, MarginV=260, Outline=3) — بدون force_style")
     print("✅ الموسيقى مدمجة مسبقاً بنسبة 15%")
 
 
