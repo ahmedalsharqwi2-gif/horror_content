@@ -19,16 +19,16 @@ assemble_video.py
 1) MAX_DURATION_SECONDS نزلت من 600 لـ 90 ثانية (دقيقة ونصف) — ده الحد
    الصلب النهائي لكل جزء عشان يصلح فعليًا لريلز فيسبوك/انستجرام، حتى لو
    generate_voice.py قدّر المدة بشكل مختلف قليلاً.
-2) تصحيح خطأ كان موجود في الكود القديم: التعليق كان يقول FontSize=64
-   لكن القيمة الفعلية في SUBTITLE_STYLE كانت FontSize=12 (نص صغير جداً
-   عمليًا). رجّعتها لـ 64 زي ما كانت الخطة الأصلية.
-3) Outline رفعناها من 3 إلى 5px بناءً على طلبك (إطار أسود أوضح حول النص
-   الأبيض لزيادة التباين على أي خلفية فيديو).
+2) SUBTITLE_STYLE بقت مطابقة تمامًا للقيم اللي حددتها:
+   FontSize=8, Outline=1.5, Alignment=9 (أعلى-يمين، مش أعلى-منتصف زي
+   قبل كده), MarginV=260, MarginL=35, MarginR=45. لو عايز ترجع للنص
+   الكبير أعلى-المنتصف زي أول نسخة، غيّر Alignment لـ8 وMarginL/R
+   لقيمة متساوية وارفع FontSize وOutline زي ما كانوا.
 
 === مكان وحجم النص (Alignment/MarginV/FontSize) ===
-Alignment=8 يثبّت النص أعلى-منتصف الفريم (مش يمين ولا شمال)، MarginV=260
-يبعّده عن حافة الشاشة العليا (تحت منطقة الكاميرا الأمامية)، وWrapStyle=2
-بيحدد أقصى سطرين. القيم دي مضبوطة على فريم رأسي 1080×1920.
+Alignment=9 يثبّت النص أعلى-يمين الفريم (جوه الهامش MarginR=45)،
+MarginV=260 يبعّده عن حافة الشاشة العليا، وWrapStyle=2 بيحدد أقصى سطرين.
+القيم دي مضبوطة على فريم رأسي 1080×1920.
 """
 
 import json
@@ -64,11 +64,11 @@ MAX_DURATION_SECONDS = 90
 #   Outline=5, Shadow=0, BorderStyle=1 -> نص أبيض حاد بحدّ أسود سميك،
 #                    من غير ظل منفصل
 SUBTITLE_STYLE = (
-    "FontName=Arial,FontSize=64,Bold=1,"
+    "FontName=Arial,FontSize=8,Bold=1,"
     "PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,"
-    "BorderStyle=1,Outline=5,Shadow=0,"
-    "Alignment=8,MarginL=60,MarginR=60,MarginV=260,"
-    "WrapStyle=2,Spacing=0"
+    "BorderStyle=1,Outline=1.5,Shadow=0,"
+    "Alignment=9,MarginV=260,MarginL=35,MarginR=45,"
+    "WrapStyle=2"
 )
 
 
@@ -246,7 +246,7 @@ def main():
             print(f"✅ الجزء {index}: {output_path}")
             print(f"✅ مدة الجزء {index}: {duration:.1f} ثانية (حد أقصى {MAX_DURATION_SECONDS}s)")
 
-    print("✅ النص: FontSize=64 Bold، سطران كحد أقصى، أعلى الشاشة (MarginV=260)، في المنتصف، Outline=5")
+    print("✅ النص: FontSize=8 Bold، سطران كحد أقصى، أعلى الشاشة (MarginV=260)، أعلى-يمين (Alignment=9)، Outline=1.5")
     print("✅ الموسيقى مدمجة مسبقاً بنسبة 15%")
 
 
