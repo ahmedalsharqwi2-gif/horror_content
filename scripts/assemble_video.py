@@ -15,10 +15,20 @@ assemble_video.py
 ولو جزء واحد بس (الوضع الافتراضي)، هنولد:
 - output/final_video.mp4
 
+=== تعديلات جديدة ===
+1) MAX_DURATION_SECONDS نزلت من 600 لـ 90 ثانية (دقيقة ونصف) — ده الحد
+   الصلب النهائي لكل جزء عشان يصلح فعليًا لريلز فيسبوك/انستجرام، حتى لو
+   generate_voice.py قدّر المدة بشكل مختلف قليلاً.
+2) تصحيح خطأ كان موجود في الكود القديم: التعليق كان يقول FontSize=64
+   لكن القيمة الفعلية في SUBTITLE_STYLE كانت FontSize=12 (نص صغير جداً
+   عمليًا). رجّعتها لـ 64 زي ما كانت الخطة الأصلية.
+3) Outline رفعناها من 3 إلى 5px بناءً على طلبك (إطار أسود أوضح حول النص
+   الأبيض لزيادة التباين على أي خلفية فيديو).
+
 === مكان وحجم النص (Alignment/MarginV/FontSize) ===
-القيم دي (MarginV=260, MarginL/R=60, FontSize=64, Outline=3, Shadow=0,
-BorderStyle=1, Alignment=8, WrapStyle=2) مضبوطة بالظبط زي ما اتحددت،
-على فريم 1080×1920 (PlayResX/Y = TARGET_WIDTH/TARGET_HEIGHT).
+Alignment=8 يثبّت النص أعلى-منتصف الفريم (مش يمين ولا شمال)، MarginV=260
+يبعّده عن حافة الشاشة العليا (تحت منطقة الكاميرا الأمامية)، وWrapStyle=2
+بيحدد أقصى سطرين. القيم دي مضبوطة على فريم رأسي 1080×1920.
 """
 
 import json
@@ -37,11 +47,13 @@ EPISODE_PATH = STATE_DIR / "current_episode.json"
 
 TARGET_WIDTH = 1080
 TARGET_HEIGHT = 1920
-MAX_DURATION_SECONDS = 600
+
+# الحد الصلب النهائي لمدة أي جزء (بالثانية) — دقيقة ونصف، مناسب لريلز
+# فيسبوك/انستجرام. أي جزء أطول من كده هيُقصّ عند هذا الحد.
+MAX_DURATION_SECONDS = 90
 
 # نص عنوان كبير وBold، سطران كحد أقصى، أعلى الشاشة أسفل منطقة الكاميرا
 # الأمامية، بنفس الإحساس اللي في صورة المرجع (خط أبيض سميك بحدّ أسود واضح).
-# القيم دي مضبوطة بالظبط على فريم رأسي 1080×1920 (TARGET_WIDTH×TARGET_HEIGHT):
 #   Alignment=8   -> يثبّت الكتلة أعلى-منتصف (7/8/9 = الصف العلوي،
 #                    8 = وسط أفقيًا جوه الهوامش)
 #   MarginV=260   -> المسافة من أعلى الفريم بالبكسل الحقيقي (لأن
@@ -49,12 +61,12 @@ MAX_DURATION_SECONDS = 600
 #   MarginL/R=60  -> متماثلة عشان Alignment=8 يتمركز على منتصف الفريم
 #                    الحقيقي مش بوكس مايل
 #   FontSize=64   -> واضح على المقاس ده من غير ما يطغى على الشاشة
-#   Outline=3, Shadow=0, BorderStyle=1 -> نص أبيض حاد بحدّ أسود صلب،
+#   Outline=5, Shadow=0, BorderStyle=1 -> نص أبيض حاد بحدّ أسود سميك،
 #                    من غير ظل منفصل
 SUBTITLE_STYLE = (
-    "FontName=Arial,FontSize=12,Bold=1,"
+    "FontName=Arial,FontSize=64,Bold=1,"
     "PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,"
-    "BorderStyle=1,Outline=3,Shadow=0,"
+    "BorderStyle=1,Outline=5,Shadow=0,"
     "Alignment=8,MarginL=60,MarginR=60,MarginV=260,"
     "WrapStyle=2,Spacing=0"
 )
@@ -141,7 +153,6 @@ def add_audio_and_subtitles(video_path: Path, final_audio: Path, subtitles: Path
 
 
 def split_clips_by_weight(clips: list, weights: list[float]) -> list[list]:
-    """يوزع قائمة المقاطع المتاحة على أجزاء بنسب متناسبة مع مدة صوت كل جزء."""
     total_weight = sum(weights) or 1.0
     counts = []
     remaining = len(clips)
@@ -159,8 +170,6 @@ def split_clips_by_weight(clips: list, weights: list[float]) -> list[list]:
     for count in counts:
         chunk = clips[cursor: cursor + count]
         if not chunk:
-            # لو معندناش مقاطع كفاية لهذا الجزء، استخدم كل المقاطع المتاحة
-            # بدل ما الجزء يفضل من غير فيديو خالص.
             chunk = clips
         result.append(chunk)
         cursor += count
@@ -197,8 +206,6 @@ def main():
     episode = json.loads(EPISODE_PATH.read_text(encoding="utf-8"))
     parts = episode.get("parts")
 
-    # توافق مع الشكل القديم من current_episode.json لو مفيش "parts" فيه
-    # (يعني generate_voice.py القديم لسه شغال، أو ملف قديم).
     if not parts:
         parts = [{
             "final_audio": str(CLIPS_DIR / "narration_with_music.mp3"),
@@ -222,9 +229,8 @@ def main():
             tmp_prefix="single",
         )
         print(f"✅ الفيديو النهائي: {output_path}")
-        print(f"✅ المدة: {duration:.1f} ثانية")
+        print(f"✅ المدة: {duration:.1f} ثانية (حد أقصى {MAX_DURATION_SECONDS}s)")
     else:
-        # نوزّع المقاطع المتاحة على الأجزاء بنسبة مدة صوت كل جزء.
         weights = [get_audio_duration(Path(part["final_audio"])) for part in parts]
         clip_groups = split_clips_by_weight(clips, weights)
 
@@ -238,9 +244,9 @@ def main():
                 tmp_prefix=f"part{index}",
             )
             print(f"✅ الجزء {index}: {output_path}")
-            print(f"✅ مدة الجزء {index}: {duration:.1f} ثانية")
+            print(f"✅ مدة الجزء {index}: {duration:.1f} ثانية (حد أقصى {MAX_DURATION_SECONDS}s)")
 
-    print("✅ النص: FontSize=12 Bold، سطران كحد أقصى، أعلى الشاشة (MarginV=260)، في المنتصف")
+    print("✅ النص: FontSize=64 Bold، سطران كحد أقصى، أعلى الشاشة (MarginV=260)، في المنتصف، Outline=5")
     print("✅ الموسيقى مدمجة مسبقاً بنسبة 15%")
 
 
