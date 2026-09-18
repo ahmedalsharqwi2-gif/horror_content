@@ -2,38 +2,35 @@
 publish_buffer.py - نشر فيديو (أو فيديوهين لو القصة اتقسمت جزئين) إلى قنوات
 Buffer مع عنوان وهاشتاجات، مع جدولة تلقائية للجزء الثاني.
 
-=== آخر تعديلين (إصلاح فشل فيسبوك ويوتيوب) ===
+=== تعديلات جديدة (انستجرام + جدولة 3م/7م) ===
 
-1) فشل فيسبوك في الجزأين:
-   Buffer بترجع "Field 'title' is not defined by type FacebookPostMetadataInput".
-   يعني metadata.facebook بتقبل بس حقل type ("reel")، مش title. كنا
-   بنبعت title جوه metadata.facebook غلط. العنوان أصلاً موجود في نص
-   البوست نفسه (build_post_text)، فمفيش داعي نكرره في الـ metadata.
-   → metadata_for() بقت ترجع {"facebook": {"type": "reel"}} بس.
+1) استبدال TikTok بـ Instagram في CHANNEL_SERVICES و metadata_for():
+   لازم تستبدل قيمة "REPLACE_WITH_YOUR_INSTAGRAM_CHANNEL_ID" تحت بمعرّف
+   قناة الانستجرام الفعلي عندك في Buffer (تلاقيه في رابط/إعدادات القناة
+   داخل Buffer Dashboard). شكل الـ metadata الخاص بانستجرام هنا مبني على
+   نفس نمط فيسبوك (type: "reel") لأن انستجرام Reels قريب من نفس المنطق
+   في Buffer — لو Buffer رجّع خطأ "Field ... is not defined"، يبقى لازم
+   تتأكد من الشكل الدقيق لـ InstagramPostMetadataInput من توثيق Buffer
+   وتعدّل القاموس تحت بنفس الأسلوب.
 
-2) Scheduled posts limit reached (10/10) — ظهر أول مرة بس في الجزء
-   المجدول، وبعدين بقى بيظهر حتى في addToQueue (الجزء الفوري) كمان.
-   ده معناه إن Buffer بتحسب أي بوست لسه ماتنشرش (فوري في الطابور أو
-   مجدول لوقت محدد) كـ "scheduled" ضد نفس الحد (10 لكل قناة). يعني
-   لو القناة فيها 10 بوستات معلّقة أصلاً، مفيش أي بوست جديد هينفع
-   يتضاف — سواء فوري أو مجدول. ده حد حساب حقيقي مش حاجة نلتف عليها
-   بالكود؛ ضفنا preflight check (count_pending_posts) بيسأل Buffer
-   قبل كل محاولة نشر "كام بوست معلّق على القناة دي؟" ولو وصل للحد
-   (CHANNEL_PENDING_LIMIT، افتراضي 10) بيتخطى المحاولة برسالة واضحة
-   بدل ما يحاول ويفشل. الحل الحقيقي: تنشر/تمسح بعض البوستات المعلّقة
-   يدويًا من Buffer Dashboard، أو تقلل معدل تشغيل الـ workflow، أو
-   ترفّع خطة Buffer.
+2) الجدولة بقت فعليًا 3 عصرًا للجزء الأول و 7 مساءً للجزء الثاني (فرق 4
+   ساعات بالضبط)، متوافقة مع الـ workflow اللي بيشغّل السكريبت مرة واحدة
+   بس يوميًا الساعة 13:00 UTC (= 3 عصرًا القاهرة)، وبينشر الجزء الأول
+   فورًا (addToQueue) ويجدول الجزء الثاني عن طريق Buffer نفسها (dueAt)
+   بعد PART2_DELAY_HOURS ساعة (افتراضيًا 4 دلوقتي، يعني 7 مساءً بالضبط).
+   ⚠️ مهم: لازم الـ workflow يشغّل الجزء دا مرة واحدة يوميًا فقط (13:00)،
+   لأن تشغيله مرة تانية الساعة 17:00 هيولّد حلقة كاملة جديدة تمامًا
+   (مش نفس الحلقة اللي جزئها الأول نشر الساعة 3)، وده غير المطلوب.
 
-=== ليه اتعدل الملف قبل كده ===
+=== الإصلاحات السابقة (فيسبوك ويوتيوب) ===
 
-- generate_voice.py بقى يقسم القصص الطويلة جزئين، وبيكتب ملفات الصوت
-  بلاحقة (narration_with_music_part1.mp3 / _part2.mp3) بدل الاسم الثابت
-  القديم.
-- كل جزء بيترفع لوحده على GitHub Release، وبينشر بعنوان/كابشن مخصص ليه
-  (تنويه "الجزء 1/2").
-- الجزء الأول ينشر فورًا (mode: addToQueue)، والجزء الثاني يتجدول فعليًا
-  جوه Buffer نفسها (mode: customScheduled + dueAt). الافتراضي 24 ساعة،
-  غيّرها بمتغير بيئة PART2_DELAY_HOURS.
+1) فشل فيسبوك: metadata.facebook بتقبل بس حقل type ("reel")، مش title.
+   العنوان أصلاً موجود في نص البوست نفسه (build_post_text).
+
+2) Scheduled posts limit reached (10/10): Buffer بتحسب أي بوست لسه
+   ماتنشرش (فوري في الطابور أو مجدول لوقت محدد) كـ "scheduled" ضد نفس
+   الحد (10 لكل قناة). ضفنا preflight check (count_pending_posts) بيسأل
+   Buffer قبل كل محاولة نشر، ولو وصل للحد بيتخطى المحاولة برسالة واضحة.
 """
 
 import json
@@ -53,18 +50,14 @@ BUFFER_GRAPHQL_API = "https://api.buffer.com"
 GITHUB_API = "https://api.github.com"
 RELEASE_TAG = "media-assets"
 
-# كل جزء بينشر بعد اللي قبله بالمدة دي (ساعات)، مضروبة في (رقم الجزء - 1).
-# بافتراض جزئين: جزء 2 = فورًا + 24 ساعة.
-PART_DELAY_HOURS = float(os.environ.get("PART2_DELAY_HOURS", "24"))
+# الفرق الافتراضي بين نشر الجزء الأول (3 عصرًا) والجزء الثاني (7 مساءً) =
+# 4 ساعات بالضبط. غيّره من GitHub Secrets/Variables باسم PART2_DELAY_HOURS
+# لو غيّرت مواعيد الكرون في الـ workflow.
+PART_DELAY_HOURS = float(os.environ.get("PART2_DELAY_HOURS", "4"))
 
-# نص الخطأ اللي Buffer بيرجعه لما حد الجدولة يخلص (10 بوستات مجدولة).
 SCHEDULE_LIMIT_MARKER = "Scheduled posts limit"
 
-# أقصى عدد بوستات "معلّقة" (queued أو scheduled، الاتنين بيتحسبوا "scheduled"
-# في نظر Buffer) مسموح بيها لكل قناة قبل ما تتوقف عن المحاولة.
 CHANNEL_PENDING_LIMIT = int(os.environ.get("CHANNEL_PENDING_LIMIT", "10"))
-# لو True (الافتراضي)، هنسأل Buffer الأول كام بوست معلّق على كل قناة قبل
-# أي محاولة نشر — بدل ما نحاول ونفشل بعد ما نكون رفعنا الفيديو بالفعل.
 ENABLE_PREFLIGHT_CHECK = os.environ.get("ENABLE_PREFLIGHT_CHECK", "true").lower() != "false"
 
 GET_ORGANIZATIONS_QUERY = """
@@ -73,8 +66,6 @@ query GetOrganizations {
 }
 """
 
-# بيرجع أول 10 بوستات "scheduled" (فيها القيّم الفوري + المجدول) لقناة معيّنة.
-# مش محتاجين نعدّ أكتر من 10 أصلاً لأن ده أقصى حد Buffer بيسمح بيه.
 GET_PENDING_POSTS_QUERY = """
 query GetPendingPosts($organizationId: OrganizationId!, $channelId: ChannelId!) {
   posts(
@@ -89,13 +80,15 @@ query GetPendingPosts($organizationId: OrganizationId!, $channelId: ChannelId!) 
 }
 """
 
+# ⚠️ استبدل هذا المعرّف بمعرّف قناة انستجرام الفعلي عندك في Buffer.
+INSTAGRAM_CHANNEL_ID_PLACEHOLDER = "REPLACE_WITH_YOUR_INSTAGRAM_CHANNEL_ID"
+
 CHANNEL_SERVICES = {
     "6aaa8778ea19ca0bde57da16": "youtube",
-    "6aaa8700ea19ca0bde57d3fc": "tiktok",
+    INSTAGRAM_CHANNEL_ID_PLACEHOLDER: "instagram",  # كان تيك توك، بدّلناه بانستجرام
     "6aaa853fea19ca0bde57b5f7": "facebook",
 }
 
-# نشر فوري (زي ما كان بالظبط) — بيدخل طابور Buffer العادي.
 CREATE_POST_MUTATION_QUEUE = """
 mutation CreatePost(
   $text: String!
@@ -119,9 +112,6 @@ mutation CreatePost(
 }
 """
 
-# نشر مجدول لوقت محدد (للجزء الثاني وما بعده).
-# ⚠️ لو Buffer رفض $dueAt: DateTime! بخطأ نوع، جرّب "String!" بدالها —
-# نفس القيمة (ISO 8601) بتتبعت زي ما هي.
 CREATE_POST_MUTATION_SCHEDULED = """
 mutation CreateScheduledPost(
   $text: String!
@@ -210,11 +200,12 @@ def metadata_for(channel_id: str, title: str) -> dict | None:
             "isAiGenerated": True,
         }}
     if service == "facebook":
-        # FacebookPostMetadataInput بيقبل بس "type" — مفيش title هنا.
-        # العنوان موجود أصلاً جوه نص البوست (build_post_text).
         return {"facebook": {"type": "reel"}}
-    if service == "tiktok":
-        return {"tiktok": {"isAiGenerated": True}}
+    if service == "instagram":
+        # بنفس نمط فيسبوك: Reels على انستجرام بتحتاج نوع "reel".
+        # ⚠️ لو Buffer رجّع خطأ نوع الحقل هنا، راجع
+        # InstagramPostMetadataInput في توثيق Buffer GraphQL وعدّل الحقول.
+        return {"instagram": {"type": "reel"}}
     return None
 
 
@@ -253,8 +244,6 @@ def create_buffer_post(
         except RuntimeError as error:
             if SCHEDULE_LIMIT_MARKER not in str(error):
                 raise
-            # حد الجدولة في Buffer خلص (10 بوستات مجدولة) — بدل ما الجزء
-            # يفشل، ننشره فورًا في الطابور العادي بدل الجدولة.
             print(f"    ⚠️ {SCHEDULE_LIMIT_MARKER} — هنشر فورًا (addToQueue) بدل الجدولة.")
             variables = {
                 "text": post_text, "channelId": channel_id,
@@ -270,8 +259,6 @@ def create_buffer_post(
 
 
 def get_organization_id(api_key: str) -> str:
-    """أول Organization ID متاح في الحساب — كافي هنا لأننا مش محتاجين نفرّق
-    بين منظمات متعددة، بس Buffer بيتطلبه كباراميتر إلزامي في posts query."""
     result = _send_graphql(GET_ORGANIZATIONS_QUERY, {}, api_key)
     organizations = result.get("account", {}).get("organizations", [])
     if not organizations:
@@ -280,8 +267,6 @@ def get_organization_id(api_key: str) -> str:
 
 
 def count_pending_posts(organization_id: str, channel_id: str, api_key: str) -> int:
-    """عدد البوستات المعلّقة (queued أو scheduled) على القناة دي دلوقتي،
-    مقفول عند 10 لأن ده أقصى حاجة إحنا محتاجينها (حد Buffer)."""
     result = _send_graphql(
         GET_PENDING_POSTS_QUERY,
         {"organizationId": organization_id, "channelId": channel_id},
@@ -311,7 +296,6 @@ def parse_channel_ids(raw: str) -> list[str]:
 
 
 def build_post_text(caption: str, title: str) -> str:
-    """يحافظ على نص المنشور ويضمن وجود العنوان والهاشتاجات دون تكرار."""
     caption = re.sub(r"^\s*=\s*", "", caption).strip()
     title = re.sub(r"^\s*=\s*", "", title).strip()
 
@@ -337,15 +321,7 @@ def schedule_iso(hours_from_now: float) -> str:
 
 
 def resolve_parts(episode: dict) -> list[dict]:
-    """
-    يحدد أجزاء الحلقة (جزء واحد أو جزئين) اعتمادًا على episode["parts"]
-    اللي بيكتبها generate_voice.py، وبيبني مسار الفيديو المتوقع لكل جزء.
-
-    الاصطلاح: نفس اللاحقة اللي بيستخدمها generate_voice.py لملفات الصوت
-    (فاضية للحلقة الواحدة، _part1/_part2 للتقسيم) — بافتراض إن
-    assemble_video.py بيطلّع الفيديو بنفس اللاحقة بالظبط.
-    """
-    raw_parts = episode.get("parts") or [{}]  # توافق مع حلقات قديمة من غير "parts"
+    raw_parts = episode.get("parts") or [{}]
     total = len(raw_parts)
     parts = []
     for index in range(1, total + 1):
@@ -359,16 +335,15 @@ def resolve_parts(episode: dict) -> list[dict]:
 
 
 def augment_for_part(title: str, caption: str, index: int, total: int) -> tuple[str, str]:
-    """يضيف تنويه الجزء (1/2) للعنوان والكابشن لو الحلقة متقسمة."""
     if total <= 1:
         return title, caption
 
     part_title = f"{title} (الجزء {index})"
     if index < total:
-        note = "🔻 الجزء التاني جاي قريب... تابعونا عشان متفوتوش النهاية 👀"
+        note = "🔻 الجزء الثاني ينشر اليوم الساعة 7 مساءً... تابعونا 👀"
         part_caption = f"{caption}\n\n{note}"
     else:
-        note = "🎬 استكمال الجزء اللي فات ⬆️"
+        note = "🎬 استكمال الجزء الأول ⬆️"
         part_caption = f"{note}\n\n{caption}"
     return part_title, part_caption
 
@@ -382,6 +357,11 @@ def main() -> None:
         sys.exit("BUFFER_API_KEY, BUFFER_CHANNEL_ID and GITHUB_TOKEN are required.")
     if not EPISODE_PATH.exists():
         sys.exit("state/current_episode.json is missing.")
+    if INSTAGRAM_CHANNEL_ID_PLACEHOLDER in raw_ids:
+        print(
+            "⚠️ لسه فيه Placeholder لمعرّف انستجرام في BUFFER_CHANNEL_ID — "
+            "استبدله بمعرّف القناة الفعلي من Buffer قبل التشغيل الحقيقي."
+        )
 
     channel_ids = parse_channel_ids(raw_ids)
 
@@ -400,7 +380,6 @@ def main() -> None:
 
     parts = resolve_parts(episode)
 
-    # ── فحص كل الفيديوهات المطلوبة قبل أي نشر، برسالة تحدد الجزء الناقص بالظبط ──
     missing = [p for p in parts if not p["video_path"].exists() or p["video_path"].stat().st_size == 0]
     if missing:
         names = ", ".join(str(p["video_path"].relative_to(ROOT_DIR)) for p in missing)
@@ -413,6 +392,7 @@ def main() -> None:
     print(f"Configured Buffer channels: {len(channel_ids)}")
     print(f"Post title loaded: {title[:80]}")
     print(f"Episode parts: {len(parts)}")
+    print(f"Part 2 delay: {PART_DELAY_HOURS}h (الجزء 1: ٣ عصرًا ← الجزء 2: ٧ مساءً)")
     hashtag_count = len(re.findall(r"(?<!\w)#\S+", caption))
     print(f"Hashtags detected: {hashtag_count}")
 
@@ -427,9 +407,9 @@ def main() -> None:
         due_at = None
         if index > 1:
             due_at = schedule_iso(PART_DELAY_HOURS * (index - 1))
-            print(f"Part {index}/{total} scheduled for {due_at} (UTC).")
+            print(f"Part {index}/{total} scheduled for {due_at} (UTC) — ≈ 7 مساءً بتوقيت القاهرة.")
         else:
-            print(f"Part {index}/{total} publishing now (queue).")
+            print(f"Part {index}/{total} publishing now (queue) — ≈ 3 عصرًا بتوقيت القاهرة.")
 
         video_url = upload_media(part["video_path"], github_token)
         print(f"Part {index}/{total}: public video URL created successfully.")
