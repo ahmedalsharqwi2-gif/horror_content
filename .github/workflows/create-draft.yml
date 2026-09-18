@@ -61,6 +61,11 @@ jobs:
         env:
           BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
           BUFFER_CHANNEL_ID: ${{ secrets.BUFFER_CHANNEL_ID }}
+          # لازم نفس المعرّفات دي تكون جزء من BUFFER_CHANNEL_ID كمان
+          # (مفصولة بفواصل)، عشان الخدمة تتعرّف صح لكل قناة.
+          BUFFER_YOUTUBE_CHANNEL_ID: ${{ secrets.BUFFER_YOUTUBE_CHANNEL_ID }}
+          BUFFER_FACEBOOK_CHANNEL_ID: ${{ secrets.BUFFER_FACEBOOK_CHANNEL_ID }}
+          BUFFER_INSTAGRAM_CHANNEL_ID: ${{ secrets.BUFFER_INSTAGRAM_CHANNEL_ID }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # الفرق بين نشر الجزء الأول (3 عصرًا، فوري) والجزء الثاني
           # (يتجدول تلقائيًا) — 4 ساعات بالضبط = 7 مساءً بالتمام.
