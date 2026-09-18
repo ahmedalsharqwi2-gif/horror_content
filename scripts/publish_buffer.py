@@ -80,14 +80,43 @@ query GetPendingPosts($organizationId: OrganizationId!, $channelId: ChannelId!) 
 }
 """
 
-# ⚠️ استبدل هذا المعرّف بمعرّف قناة انستجرام الفعلي عندك في Buffer.
-INSTAGRAM_CHANNEL_ID_PLACEHOLDER = "REPLACE_WITH_YOUR_INSTAGRAM_CHANNEL_ID"
+# === تعديل: خريطة الخدمات بقت ديناميكية عن طريق GitHub Secrets ===
+# المشكلة اللي ظهرت في التشغيل: القناة كانت بتطلع "unknown" لأن معرّف
+# انستجرام الحقيقي (في BUFFER_CHANNEL_ID) لم يكن مطابقًا لأي مفتاح في
+# القاموس الثابت القديم (كان لسه فيه Placeholder)، فـ metadata_for() كانت
+# بترجع None ومفيش "type" بيتبعت، وده سبب الخطأ:
+# "Instagram posts require a type (post, story, or reel)".
+#
+# الحل: بدل ما نكتب المعرّفات في الكود، بنقراها من GitHub Secrets ونبني
+# الخريطة منها وقت التشغيل. كده أي معرّف حقيقي بتحطه في الـ Secret
+# هيتربط بالخدمة الصح تلقائيًا، ومفيش احتمال تنسى تعدّل الكود.
+#
+# أضف/تأكد من الـ Secrets دي في GitHub (Settings → Secrets → Actions):
+#   BUFFER_YOUTUBE_CHANNEL_ID
+#   BUFFER_FACEBOOK_CHANNEL_ID
+#   BUFFER_INSTAGRAM_CHANNEL_ID
+# ولازم BUFFER_CHANNEL_ID (المُستخدم فعليًا في النشر) يحتوي على نفس
+# المعرّفات دي (مفصولة بفواصل)، عشان القناة تتعرّف صح.
+def build_channel_services() -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    env_map = {
+        "BUFFER_YOUTUBE_CHANNEL_ID": "youtube",
+        "BUFFER_FACEBOOK_CHANNEL_ID": "facebook",
+        "BUFFER_INSTAGRAM_CHANNEL_ID": "instagram",
+    }
+    for env_name, service in env_map.items():
+        channel_id = os.environ.get(env_name, "").strip()
+        if channel_id:
+            mapping[channel_id] = service
 
-CHANNEL_SERVICES = {
-    "6aaa8778ea19ca0bde57da16": "youtube",
-    INSTAGRAM_CHANNEL_ID_PLACEHOLDER: "instagram",  # كان تيك توك، بدّلناه بانستجرام
-    "6aaa853fea19ca0bde57b5f7": "facebook",
-}
+    # توافق مع الإعداد القديم لو الـ Secrets الجديدة لسه متضافتش: نفس
+    # المعرّفات الثابتة القديمة ليوتيوب وفيسبوك (كانت شغالة فعليًا).
+    mapping.setdefault("6aaa8778ea19ca0bde57da16", "youtube")
+    mapping.setdefault("6aaa853fea19ca0bde57b5f7", "facebook")
+    return mapping
+
+
+CHANNEL_SERVICES = build_channel_services()
 
 CREATE_POST_MUTATION_QUEUE = """
 mutation CreatePost(
@@ -357,13 +386,22 @@ def main() -> None:
         sys.exit("BUFFER_API_KEY, BUFFER_CHANNEL_ID and GITHUB_TOKEN are required.")
     if not EPISODE_PATH.exists():
         sys.exit("state/current_episode.json is missing.")
-    if INSTAGRAM_CHANNEL_ID_PLACEHOLDER in raw_ids:
-        print(
-            "⚠️ لسه فيه Placeholder لمعرّف انستجرام في BUFFER_CHANNEL_ID — "
-            "استبدله بمعرّف القناة الفعلي من Buffer قبل التشغيل الحقيقي."
-        )
 
     channel_ids = parse_channel_ids(raw_ids)
+
+    # تحذير مبكر واضح بدل ما نكتشف المشكلة بعد رفع الفيديو ومحاولة النشر:
+    # أي قناة في BUFFER_CHANNEL_ID مالهاش خدمة معروفة (يعني مش موجودة في
+    # CHANNEL_SERVICES) هتتبعت من غير "type" وBuffer هيرفضها زي ما حصل
+    # مع انستجرام قبل كده.
+    unknown_channels = [cid for cid in channel_ids if cid not in CHANNEL_SERVICES]
+    if unknown_channels:
+        print(
+            "⚠️ القنوات دي معرّفة في BUFFER_CHANNEL_ID لكن مش متعرّف على "
+            "خدمتها (هتفشل غالبًا زي 'Instagram posts require a type'): "
+            + ", ".join(unknown_channels)
+            + " — تأكد إن نفس المعرّف موجود في BUFFER_INSTAGRAM_CHANNEL_ID "
+              "(أو YOUTUBE/FACEBOOK حسب الحالة) في GitHub Secrets."
+        )
 
     organization_id = None
     if ENABLE_PREFLIGHT_CHECK:
@@ -388,6 +426,8 @@ def main() -> None:
             f"(الحلقة مقسّمة لـ {len(parts)} جزء/أجزاء حسب current_episode.json؛ "
             f"تأكد إن assemble_video.py بيطلّع فيديو لكل جزء بنفس اللاحقة _part1/_part2)"
         )
+
+    print(f"Channel service map resolved: {CHANNEL_SERVICES}")
 
     print(f"Configured Buffer channels: {len(channel_ids)}")
     print(f"Post title loaded: {title[:80]}")
