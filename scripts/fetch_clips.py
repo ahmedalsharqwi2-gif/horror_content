@@ -15,12 +15,26 @@ fetch_clips.py
   لكل كلمة بحث.
 - فيه سقف إجمالي (MAX_TOTAL_CLIPS) يمنع تنزيل عدد ضخم جدًا من الكليبات في
   حلقة واحدة (تحكم في الوقت والمساحة)، قابل للتعديل براحتك.
+
+*جديد*: تحمّل انقطاعات الشبكة العابرة (زي ConnectionResetError اللي كانت
+بتوقف الـ run كله وتضيّع كل الكليبات اللي اتنزلت قبلها):
+- كل طلبات الشبكة (بحث وتحميل) بتعدي دلوقتي على `requests.Session` معاها
+  `Retry` adapter بيعيد المحاولة تلقائيًا على مستوى الـ HTTP connection
+  نفسه (بيغطي حتى فشل الـ SSL/TLS handshake).
+- `download_clip` كمان عندها طبقة retry يدوية فوق كده (مع مسح أي ملف
+  ناقص قبل كل محاولة جديدة)، عشان تتعامل مع أخطاء زي
+  ChunkedEncodingError اللي ممكن تحصل بعد ما جزء من الملف اتكتب فعلاً.
+- في main()، لو كليب واحد فشل بعد كل المحاولات، بنتخطاه ونكمل باقي
+  الكليبات بدل ما نوقف السكريبت كله ونضيّع اللي اتنزل قبل كده.
 """
 import os
 import json
 import sys
+import time
 import requests
 from pathlib import Path
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 SCRIPT_DIR = Path(__file__).parent
 STATE_DIR = SCRIPT_DIR.parent / "state"
@@ -41,6 +55,32 @@ CLIPS_PER_KEYWORD = 4
 MAX_TOTAL_CLIPS = 40
 
 MIN_DURATION_SECONDS = 4    # نتجنب الكليبات القصيرة جدًا
+
+# عدد محاولات التحميل القصوى لكل كليب (لو انقطع الاتصال أثناء التحميل).
+DOWNLOAD_MAX_ATTEMPTS = 4
+
+
+def _build_session() -> requests.Session:
+    """Session واحدة لكل الطلبات (بحث + تحميل) مع Retry adapter بيعيد
+    المحاولة تلقائيًا على انقطاعات الشبكة العابرة (Connection reset,
+    timeouts, أكواد 429/5xx)، بما فيها فشل الـ SSL handshake نفسه —
+    ده بالظبط اللي كان بيوقف fetch_clips.py قبل كده."""
+    session = requests.Session()
+    retry = Retry(
+        total=5,
+        connect=5,
+        read=5,
+        backoff_factor=2,          # 2s, 4s, 8s, 16s, 32s بين المحاولات
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["GET"],
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return session
+
+
+_SESSION = _build_session()
 
 
 def load_json(path: Path, default):
@@ -65,7 +105,7 @@ def search_pexels(keyword: str, api_key: str, used_ids: set, count: int) -> list
             "per_page": RESULTS_PER_PAGE,
             "page": page,
         }
-        resp = requests.get(PEXELS_SEARCH_URL, headers=headers, params=params, timeout=20)
+        resp = _SESSION.get(PEXELS_SEARCH_URL, headers=headers, params=params, timeout=20)
         resp.raise_for_status()
         data = resp.json()
 
@@ -101,12 +141,32 @@ def search_pexels(keyword: str, api_key: str, used_ids: set, count: int) -> list
     return found
 
 
-def download_clip(url: str, dest: Path):
-    resp = requests.get(url, stream=True, timeout=60)
-    resp.raise_for_status()
-    with open(dest, "wb") as f:
-        for chunk in resp.iter_content(chunk_size=8192):
-            f.write(chunk)
+def download_clip(url: str, dest: Path, max_attempts: int = DOWNLOAD_MAX_ATTEMPTS):
+    """بتحمّل الكليب مع إعادة محاولة يدوية فوق retry الـ Session نفسها،
+    عشان تغطي أخطاء زي ChunkedEncodingError اللي ممكن تحصل بعد ما جزء من
+    الملف اتكتب فعلاً على الديسك (مش مجرد فشل في الاتصال الأولي). بنمسح
+    أي ملف ناقص قبل كل محاولة جديدة عشان ميفضلش كليب معطوب على الديسك."""
+    last_error: Exception | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            resp = _SESSION.get(url, stream=True, timeout=60)
+            resp.raise_for_status()
+            with open(dest, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            return
+        except (requests.exceptions.ConnectionError,
+                requests.exceptions.ChunkedEncodingError,
+                requests.exceptions.Timeout,
+                requests.exceptions.HTTPError) as exc:
+            last_error = exc
+            dest.unlink(missing_ok=True)
+            if attempt < max_attempts:
+                wait = 3 * attempt
+                print(f"⚠️ فشلت محاولة تحميل الكليب {attempt}/{max_attempts} ({exc})؛ إعادة محاولة بعد {wait}s")
+                time.sleep(wait)
+
+    raise last_error
 
 
 def main():
@@ -139,7 +199,15 @@ def main():
 
         for result in results:
             dest_path = CLIPS_DIR / f"clip_{len(fetched_clips):02d}.mp4"
-            download_clip(result["url"], dest_path)
+            try:
+                download_clip(result["url"], dest_path)
+            except requests.exceptions.RequestException as exc:
+                # كليب واحد فشل بعد كل المحاولات — نتخطاه ونكمل الباقي
+                # بدل ما نوقف السكريبت كله ونضيّع كل الكليبات اللي
+                # اتنزلت قبل كده في نفس الـ run.
+                print(f"❌ فشل تحميل كليب '{keyword}' (Pexels ID: {result['id']}) بعد {DOWNLOAD_MAX_ATTEMPTS} محاولات: {exc} — هنتخطاه")
+                continue
+
             used_ids.add(result["id"])
 
             fetched_clips.append({
