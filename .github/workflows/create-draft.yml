@@ -1,19 +1,30 @@
-# === تعديل جديد مهم ===
-# كان فيه اتنين cron (13:00 و 17:00 UTC) — ده غلط لو هدفك نشر جزئين من
-# *نفس* الحلقة على الساعة 3 والساعة 7: التشغيل الثاني (17:00) كان هيولّد
-# حلقة كاملة جديدة تمامًا بدل ما يكمّل الحلقة اللي بدأت الساعة 3.
-# الحل: كرون واحد بس الساعة 13:00 UTC (= 3 عصرًا بتوقيت القاهرة UTC+2).
-# السكريبت بينشر الجزء الأول فورًا، وبيجدول الجزء الثاني عن طريق Buffer
-# نفسها (dueAt) بعد PART2_DELAY_HOURS ساعة (4 ساعات افتراضيًا = 7 مساءً).
+# === إصلاح جديد مهم (سبب تضارب الحلقات المتعددة) ===
+# اتشال trigger الـ "push: branches: [main]" اللي كان موجود هنا قبل كده.
+# السبب: أي push على main (حتى تعديل بسيط في الكود وانت بتصلّح باج) كان
+# بيشغّل الـ pipeline بالكامل من الصفر: توليد سكريبت جديد + فيديو جديد +
+# نشر فوري لكل المنصات. وده اللي كان بيولّد حلقات مختلفة تمامًا وينشرها
+# فوق بعض من غير ما تقصد، في أوقات عشوائية حسب وقت الـ push مش حسب الكرون.
+#
+# دلوقتي الـ pipeline بيشتغل بس في حالتين مقصودتين:
+#   1) الكرون اليومي الساعة 13:00 UTC (= 3 عصرًا بتوقيت القاهرة).
+#   2) تشغيل يدوي متعمّد (workflow_dispatch) من تبويب Actions.
+#
+# لو عايز تدفع تعديل في كود السكريبتات، ادفعه عادي — مش هيشغّل حلقة جديدة
+# تلقائيًا. لو عايز تجرّب تشغيلة كاملة بعد التعديل، استخدم "Run workflow"
+# يدويًا من GitHub Actions.
 
 name: Create and Publish Horror Episode
 
 on:
   schedule:
-    - cron: "0 13 * * *" # 3 عصراً بتوقيت القاهرة عند UTC+2 — الجزء الأول ينشر فورًا، الجزء الثاني بيتجدول تلقائيًا الساعة 7 مساءً عن طريق Buffer
-  push:
-    branches: [main]
+    - cron: "0 13 * * *" # 3 عصراً بتوقيت القاهرة (UTC+2) — الجزء الأول ينشر (customScheduled ≈ الآن)، الجزء الثاني بيتجدول تلقائيًا الساعة 7 مساءً عن طريق Buffer
   workflow_dispatch:
+
+# يمنع تشغيلتين يشتغلوا فوق بعض في نفس الوقت (لو الكرون اتأخر وتزامن مع
+# تشغيل يدوي مثلاً)، بدل ما نعتمد بس على منع تكرار الـ push.
+concurrency:
+  group: horror-episode-pipeline
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -61,14 +72,12 @@ jobs:
         env:
           BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
           BUFFER_CHANNEL_ID: ${{ secrets.BUFFER_CHANNEL_ID }}
-          # لازم نفس المعرّفات دي تكون جزء من BUFFER_CHANNEL_ID كمان
-          # (مفصولة بفواصل)، عشان الخدمة تتعرّف صح لكل قناة.
           BUFFER_YOUTUBE_CHANNEL_ID: ${{ secrets.BUFFER_YOUTUBE_CHANNEL_ID }}
           BUFFER_FACEBOOK_CHANNEL_ID: ${{ secrets.BUFFER_FACEBOOK_CHANNEL_ID }}
           BUFFER_INSTAGRAM_CHANNEL_ID: ${{ secrets.BUFFER_INSTAGRAM_CHANNEL_ID }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # الفرق بين نشر الجزء الأول (3 عصرًا، فوري) والجزء الثاني
-          # (يتجدول تلقائيًا) — 4 ساعات بالضبط = 7 مساءً بالتمام.
+          # الفرق بين نشر الجزء الأول (٣ عصرًا) والجزء الثاني (٧ مساءً) —
+          # 4 ساعات بالضبط. كلاهما customScheduled دلوقتي.
           PART2_DELAY_HOURS: "4"
         run: python scripts/publish_buffer.py
 
@@ -76,8 +85,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: published-video
-          # final_video.mp4 (حلقة واحدة) أو final_video_part1.mp4 +
-          # final_video_part2.mp4 (حلقة متقسمة)
           path: output/final_video*.mp4
           retention-days: 14
           if-no-files-found: error
