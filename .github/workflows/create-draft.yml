@@ -36,6 +36,10 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+        with:
+          # لازم fetch-depth: 0 (مش الافتراضي 1) عشان نقدر نعمل
+          # git pull --rebase بأمان في آخر خطوة من غير مشاكل shallow clone.
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -94,5 +98,26 @@ jobs:
           git config user.name "content-bot"
           git config user.email "bot@users.noreply.github.com"
           git add state/used_clips.json
-          git commit -m "chore: update used clips tracking [skip ci]" || echo "لا يوجد تغيير"
-          git push
+
+          if git diff --cached --quiet; then
+            echo "لا يوجد تغيير"
+            exit 0
+          fi
+
+          git commit -m "chore: update used clips tracking [skip ci]"
+
+          # الريموت ممكن يكون اتغيّر وإحنا لسه شغالين (push يدوي منك، أو
+          # تشغيلة تانية) — فبنعمل pull --rebase قبل كل محاولة push، مع
+          # إعادة محاولة (retry) لو حصل تعارض تاني بالصدفة، بدل ما
+          # الخطوة تفشل مباشرة زي ما كان بيحصل قبل كده.
+          max_attempts=5
+          attempt=1
+          until git pull --rebase origin main && git push; do
+            if [ "$attempt" -ge "$max_attempts" ]; then
+              echo "❌ فشل الـ push بعد $max_attempts محاولات."
+              exit 1
+            fi
+            echo "⚠️ push فشل (محاولة $attempt/$max_attempts) — هيتم إعادة المحاولة بعد pull --rebase..."
+            attempt=$((attempt + 1))
+            sleep $((attempt * 5))
+          done
