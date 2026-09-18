@@ -181,12 +181,24 @@ def srt_time(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
 
 
+RTL_MARK = "\u200F"  # Right-to-Left Mark: يفرض ترتيب الكلمات العربية صح
+
+
 def two_lines(words: list[str]) -> str:
+    """
+    يقسّم مجموعة الكلمات على سطرين متوازنين قدر الإمكان. نضيف RTL_MARK
+    في أول كل سطر عشان نضمن إن libass يرتّب الكلمات العربية من اليمين
+    لليسار صح، حتى لو حصل التباس بسبب أرقام أو علامات ترقيم لاتينية.
+    """
     words = [word.strip() for word in words if word.strip()]
+    if not words:
+        return ""
     if len(words) <= 2:
-        return " ".join(words)
+        return RTL_MARK + " ".join(words)
     midpoint = (len(words) + 1) // 2
-    return " ".join(words[:midpoint]) + r"\N" + " ".join(words[midpoint:])
+    line_one = RTL_MARK + " ".join(words[:midpoint])
+    line_two = RTL_MARK + " ".join(words[midpoint:])
+    return line_one + r"\N" + line_two
 
 
 def split_sentences(text: str) -> list[str]:
