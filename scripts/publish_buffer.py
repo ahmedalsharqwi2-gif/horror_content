@@ -2,25 +2,27 @@
 publish_buffer.py - نشر فيديو (أو فيديوهين لو القصة اتقسمت جزئين) إلى قنوات
 Buffer مع عنوان وهاشتاجات، مع جدولة تلقائية للجزء الثاني.
 
-=== تعديلات جديدة (انستجرام + جدولة 3م/7م) ===
+=== إصلاح جديد مهم (سبب مشكلة تضارب المواعيد بين المنصات) ===
 
-1) استبدال TikTok بـ Instagram في CHANNEL_SERVICES و metadata_for():
-   لازم تستبدل قيمة "REPLACE_WITH_YOUR_INSTAGRAM_CHANNEL_ID" تحت بمعرّف
-   قناة الانستجرام الفعلي عندك في Buffer (تلاقيه في رابط/إعدادات القناة
-   داخل Buffer Dashboard). شكل الـ metadata الخاص بانستجرام هنا مبني على
-   نفس نمط فيسبوك (type: "reel") لأن انستجرام Reels قريب من نفس المنطق
-   في Buffer — لو Buffer رجّع خطأ "Field ... is not defined"، يبقى لازم
-   تتأكد من الشكل الدقيق لـ InstagramPostMetadataInput من توثيق Buffer
-   وتعدّل القاموس تحت بنفس الأسلوب.
+المشكلة اللي كانت بتحصل: الجزء الأول كان بينشر بـ mode: addToQueue، وده
+حسب توثيق Buffer الرسمي معناه "حطّه في أقرب سلوت فاضي في جدول القناة"،
+مش "انشره دلوقتي فورًا". كل قناة (فيسبوك/يوتيوب/انستجرام) ليها جدول
+سلوتات افتراضي خاص بيها جوه Buffer نفسه (زي 6 صباحًا أو 4 صباحًا لو كان
+متظبط كده من قبل)، فكانت النتيجة إن نفس الحلقة بتتوزع على أوقات مختلفة
+تمامًا في كل منصة، بدل ما تنشر الساعة 3 عصرًا مع بعض زي المطلوب.
 
-2) الجدولة بقت فعليًا 3 عصرًا للجزء الأول و 7 مساءً للجزء الثاني (فرق 4
-   ساعات بالضبط)، متوافقة مع الـ workflow اللي بيشغّل السكريبت مرة واحدة
-   بس يوميًا الساعة 13:00 UTC (= 3 عصرًا القاهرة)، وبينشر الجزء الأول
-   فورًا (addToQueue) ويجدول الجزء الثاني عن طريق Buffer نفسها (dueAt)
-   بعد PART2_DELAY_HOURS ساعة (افتراضيًا 4 دلوقتي، يعني 7 مساءً بالضبط).
-   ⚠️ مهم: لازم الـ workflow يشغّل الجزء دا مرة واحدة يوميًا فقط (13:00)،
-   لأن تشغيله مرة تانية الساعة 17:00 هيولّد حلقة كاملة جديدة تمامًا
-   (مش نفس الحلقة اللي جزئها الأول نشر الساعة 3)، وده غير المطلوب.
+الحل: الجزء الأول بقى بيستخدم customScheduled بوقت محدد (تقريبًا دلوقتي)
+بدل addToQueue، بالظبط زي الجزء الثاني، عشان كل القنوات تاخد نفس اللحظة
+بالضبط. الفرق الوحيد إن due_at للجزء الأول = "الآن" (offset=0) بينما
+الجزء الثاني = "الآن + PART2_DELAY_HOURS ساعة".
+
+⚠️ ملحوظة مهمة كمان: المشكلة التانية اللي سببت ظهور 3 حلقات مختلفة
+متضاربة مع بعض ("الظل الغامض"، "النداء من الظلام"، "المنزل المهجور")
+كانت في ملف الـ workflow نفسه (وليس هنا) — كان فيه trigger باسم
+"on: push: branches: [main]" بيخلي أي push على main (حتى تعديل بسيط
+في الكود وانت بتصلّح المشكلة) يشغّل الـ pipeline بالكامل من الصفر
+ويولّد حلقة جديدة وينشرها فورًا. تم حذف الـ trigger ده من الـ workflow
+المرفق هنا.
 
 === الإصلاحات السابقة (فيسبوك ويوتيوب) ===
 
@@ -28,9 +30,9 @@ Buffer مع عنوان وهاشتاجات، مع جدولة تلقائية لل�
    العنوان أصلاً موجود في نص البوست نفسه (build_post_text).
 
 2) Scheduled posts limit reached (10/10): Buffer بتحسب أي بوست لسه
-   ماتنشرش (فوري في الطابور أو مجدول لوقت محدد) كـ "scheduled" ضد نفس
-   الحد (10 لكل قناة). ضفنا preflight check (count_pending_posts) بيسأل
-   Buffer قبل كل محاولة نشر، ولو وصل للحد بيتخطى المحاولة برسالة واضحة.
+   ماتنشرش (مجدول لوقت محدد) كـ "scheduled" ضد نفس الحد (10 لكل قناة).
+   ضفنا preflight check (count_pending_posts) بيسأل Buffer قبل كل
+   محاولة نشر، ولو وصل للحد بيتخطى المحاولة برسالة واضحة.
 """
 
 import json
@@ -50,9 +52,9 @@ BUFFER_GRAPHQL_API = "https://api.buffer.com"
 GITHUB_API = "https://api.github.com"
 RELEASE_TAG = "media-assets"
 
-# الفرق الافتراضي بين نشر الجزء الأول (3 عصرًا) والجزء الثاني (7 مساءً) =
-# 4 ساعات بالضبط. غيّره من GitHub Secrets/Variables باسم PART2_DELAY_HOURS
-# لو غيّرت مواعيد الكرون في الـ workflow.
+# الفرق بين نشر الجزء الأول (٣ عصرًا) والجزء الثاني (٧ مساءً) = 4 ساعات
+# بالضبط. غيّره من GitHub Secrets/Variables باسم PART2_DELAY_HOURS لو
+# غيّرت مواعيد الكرون في الـ workflow.
 PART_DELAY_HOURS = float(os.environ.get("PART2_DELAY_HOURS", "4"))
 
 SCHEDULE_LIMIT_MARKER = "Scheduled posts limit"
@@ -80,18 +82,8 @@ query GetPendingPosts($organizationId: OrganizationId!, $channelId: ChannelId!) 
 }
 """
 
-# === تعديل: خريطة الخدمات بقت ديناميكية عن طريق GitHub Secrets ===
-# المشكلة اللي ظهرت في التشغيل: القناة كانت بتطلع "unknown" لأن معرّف
-# انستجرام الحقيقي (في BUFFER_CHANNEL_ID) لم يكن مطابقًا لأي مفتاح في
-# القاموس الثابت القديم (كان لسه فيه Placeholder)، فـ metadata_for() كانت
-# بترجع None ومفيش "type" بيتبعت، وده سبب الخطأ:
-# "Instagram posts require a type (post, story, or reel)".
-#
-# الحل: بدل ما نكتب المعرّفات في الكود، بنقراها من GitHub Secrets ونبني
-# الخريطة منها وقت التشغيل. كده أي معرّف حقيقي بتحطه في الـ Secret
-# هيتربط بالخدمة الصح تلقائيًا، ومفيش احتمال تنسى تعدّل الكود.
-#
-# أضف/تأكد من الـ Secrets دي في GitHub (Settings → Secrets → Actions):
+# خريطة الخدمات ديناميكية عن طريق GitHub Secrets: أضف/تأكد من الـ
+# Secrets دي في GitHub (Settings → Secrets → Actions):
 #   BUFFER_YOUTUBE_CHANNEL_ID
 #   BUFFER_FACEBOOK_CHANNEL_ID
 #   BUFFER_INSTAGRAM_CHANNEL_ID
@@ -109,8 +101,7 @@ def build_channel_services() -> dict[str, str]:
         if channel_id:
             mapping[channel_id] = service
 
-    # توافق مع الإعداد القديم لو الـ Secrets الجديدة لسه متضافتش: نفس
-    # المعرّفات الثابتة القديمة ليوتيوب وفيسبوك (كانت شغالة فعليًا).
+    # توافق مع الإعداد القديم لو الـ Secrets الجديدة لسه متضافتش.
     mapping.setdefault("6aaa8778ea19ca0bde57da16", "youtube")
     mapping.setdefault("6aaa853fea19ca0bde57b5f7", "facebook")
     return mapping
@@ -231,10 +222,6 @@ def metadata_for(channel_id: str, title: str) -> dict | None:
     if service == "facebook":
         return {"facebook": {"type": "reel"}}
     if service == "instagram":
-        # بنفس نمط فيسبوك: Reels على انستجرام بتحتاج نوع "reel"، بس Buffer
-        # رجّع خطأ إضافي بيطلب shouldShareToFeed (Boolean إلزامي) — بدونه
-        # الطلب بيترفض بـ "Field shouldShareToFeed ... was not provided".
-        # True = ينشر كـ Reel عادي يظهر في الفيد كمان (السلوك المعتاد).
         return {"instagram": {"type": "reel", "shouldShareToFeed": True}}
     return None
 
@@ -260,32 +247,34 @@ def _send_create_post(query: str, variables: dict, api_key: str) -> dict:
 
 def create_buffer_post(
     video_url: str, post_text: str, title: str, channel_id: str,
-    api_key: str, due_at: str | None = None,
+    api_key: str, due_at: str,
 ) -> dict:
+    """
+    ملحوظة: due_at بقى إلزامي دلوقتي (مش Optional زي الأول). كل الأجزاء
+    (الأول والتاني) بتتنشر بـ customScheduled بوقت محدد صراحةً، عشان كل
+    القنوات تنشر في نفس اللحظة بالظبط بدل ما تعتمد على جدول Buffer
+    الداخلي الخاص بكل قناة (وهو ده اللي كان بيسبب تضارب المواعيد).
+    """
     metadata = metadata_for(channel_id, title)
 
-    if due_at:
-        variables = {
-            "text": post_text, "channelId": channel_id, "videoUrl": video_url,
-            "metadata": metadata, "dueAt": due_at,
-        }
-        try:
-            return _send_create_post(CREATE_POST_MUTATION_SCHEDULED, variables, api_key)
-        except RuntimeError as error:
-            if SCHEDULE_LIMIT_MARKER not in str(error):
-                raise
-            print(f"    ⚠️ {SCHEDULE_LIMIT_MARKER} — هنشر فورًا (addToQueue) بدل الجدولة.")
-            variables = {
-                "text": post_text, "channelId": channel_id,
-                "videoUrl": video_url, "metadata": metadata,
-            }
-            return _send_create_post(CREATE_POST_MUTATION_QUEUE, variables, api_key)
-
     variables = {
-        "text": post_text, "channelId": channel_id,
-        "videoUrl": video_url, "metadata": metadata,
+        "text": post_text, "channelId": channel_id, "videoUrl": video_url,
+        "metadata": metadata, "dueAt": due_at,
     }
-    return _send_create_post(CREATE_POST_MUTATION_QUEUE, variables, api_key)
+    try:
+        return _send_create_post(CREATE_POST_MUTATION_SCHEDULED, variables, api_key)
+    except RuntimeError as error:
+        if SCHEDULE_LIMIT_MARKER not in str(error):
+            raise
+        # حالة استثنائية فقط: لو وصلنا لحد المجدولين عند Buffer، ننشر عن
+        # طريق addToQueue كحل بديل أخير (وده قد يهبط في وقت مختلف حسب
+        # جدول القناة الداخلي عند Buffer، لكنه أفضل من فشل النشر تمامًا).
+        print(f"    ⚠️ {SCHEDULE_LIMIT_MARKER} — هنشر عن طريق addToQueue كحل بديل (قد يهبط في وقت مختلف حسب جدول Buffer الداخلي).")
+        fallback_variables = {
+            "text": post_text, "channelId": channel_id,
+            "videoUrl": video_url, "metadata": metadata,
+        }
+        return _send_create_post(CREATE_POST_MUTATION_QUEUE, fallback_variables, api_key)
 
 
 def get_organization_id(api_key: str) -> str:
@@ -345,8 +334,17 @@ def build_post_text(caption: str, title: str) -> str:
 
 
 def schedule_iso(hours_from_now: float) -> str:
-    """توقيت UTC بصيغة تقبلها Buffer، مثال: 2026-09-17T18:30:00.000Z"""
-    due = datetime.now(timezone.utc) + timedelta(hours=hours_from_now)
+    """توقيت UTC بصيغة تقبلها Buffer، مثال: 2026-09-17T18:30:00.000Z.
+
+    offset=0 للجزء الأول (يعني "الآن" تقريبًا -> نشر فوري فعليًا)،
+    و offset=PART_DELAY_HOURS للجزء الثاني. بنضيف دقيقة أمان بسيطة لأول
+    جزء عشان نضمن إن الوقت دايمًا في المستقبل (Buffer بيرفض dueAt في
+    الماضي).
+    """
+    safety_buffer_minutes = 1 if hours_from_now == 0 else 0
+    due = datetime.now(timezone.utc) + timedelta(
+        hours=hours_from_now, minutes=safety_buffer_minutes
+    )
     return due.isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
@@ -388,11 +386,6 @@ def main() -> None:
     if not EPISODE_PATH.exists():
         sys.exit("state/current_episode.json is missing.")
 
-    # لو BUFFER_CHANNEL_ID فاضي، بنبني قائمة القنوات تلقائيًا من نفس
-    # المعرّفات اللي في BUFFER_YOUTUBE_CHANNEL_ID / FACEBOOK / INSTAGRAM
-    # (اللي بنيت منها CHANNEL_SERVICES فوق) — كده مش لازم تكرر نفس
-    # المعرّفات في Secret تاني، وده اللي سبب الخطأ "BUFFER_CHANNEL_ID ...
-    # are required" لما الـ Secret بقى فاضي.
     if raw_ids.strip():
         channel_ids = parse_channel_ids(raw_ids)
     else:
@@ -405,10 +398,6 @@ def main() -> None:
             )
         print(f"ℹ️ BUFFER_CHANNEL_ID فاضي — استخدمنا القنوات من الـ Secrets المنفصلة: {channel_ids}")
 
-    # تحذير مبكر واضح بدل ما نكتشف المشكلة بعد رفع الفيديو ومحاولة النشر:
-    # أي قناة في BUFFER_CHANNEL_ID مالهاش خدمة معروفة (يعني مش موجودة في
-    # CHANNEL_SERVICES) هتتبعت من غير "type" وBuffer هيرفضها زي ما حصل
-    # مع انستجرام قبل كده.
     unknown_channels = [cid for cid in channel_ids if cid not in CHANNEL_SERVICES]
     if unknown_channels:
         print(
@@ -444,11 +433,10 @@ def main() -> None:
         )
 
     print(f"Channel service map resolved: {CHANNEL_SERVICES}")
-
     print(f"Configured Buffer channels: {len(channel_ids)}")
     print(f"Post title loaded: {title[:80]}")
     print(f"Episode parts: {len(parts)}")
-    print(f"Part 2 delay: {PART_DELAY_HOURS}h (الجزء 1: ٣ عصرًا ← الجزء 2: ٧ مساءً)")
+    print(f"Part 2 delay: {PART_DELAY_HOURS}h (الجزء 1: ~الآن ← الجزء 2: +{PART_DELAY_HOURS}h) — كلاهما customScheduled بنفس اللحظة لكل القنوات.")
     hashtag_count = len(re.findall(r"(?<!\w)#\S+", caption))
     print(f"Hashtags detected: {hashtag_count}")
 
@@ -460,12 +448,16 @@ def main() -> None:
         part_title, part_caption = augment_for_part(title, caption, index, total)
         post_text = build_post_text(part_caption, part_title)
 
-        due_at = None
-        if index > 1:
-            due_at = schedule_iso(PART_DELAY_HOURS * (index - 1))
-            print(f"Part {index}/{total} scheduled for {due_at} (UTC) — ≈ 7 مساءً بتوقيت القاهرة.")
+        # كل الأجزاء بقت customScheduled بوقت محدد صراحةً. الجزء الأول
+        # offset=0 (يعني فورًا تقريبًا)، والجزء الثاني offset=PART_DELAY_HOURS.
+        # ده بيضمن إن كل القنوات (فيسبوك/يوتيوب/انستجرام) تنشر في نفس
+        # اللحظة بالظبط، بدل ما تعتمد على جدول addToQueue الداخلي المختلف
+        # لكل قناة (اللي كان سبب تضارب المواعيد).
+        due_at = schedule_iso(PART_DELAY_HOURS * (index - 1))
+        if index == 1:
+            print(f"Part {index}/{total} scheduled for {due_at} (UTC) — ≈ الآن (٣ عصرًا بتوقيت القاهرة وقت تشغيل الكرون).")
         else:
-            print(f"Part {index}/{total} publishing now (queue) — ≈ 3 عصرًا بتوقيت القاهرة.")
+            print(f"Part {index}/{total} scheduled for {due_at} (UTC) — ≈ ٧ مساءً بتوقيت القاهرة.")
 
         video_url = upload_media(part["video_path"], github_token)
         print(f"Part {index}/{total}: public video URL created successfully.")
