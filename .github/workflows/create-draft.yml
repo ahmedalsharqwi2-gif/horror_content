@@ -12,6 +12,11 @@
 # لو عايز تدفع تعديل في كود السكريبتات، ادفعه عادي — مش هيشغّل حلقة جديدة
 # تلقائيًا. لو عايز تجرّب تشغيلة كاملة بعد التعديل، استخدم "Run workflow"
 # يدويًا من GitHub Actions.
+#
+# === تعديل جديد: ترقية الإصدارات لإزالة تحذير Node.js 20 ===
+# checkout@v4 → v5، setup-python@v5 → v6، upload-artifact@v4 → v5 —
+# الإصدارات دي بتشتغل على Node.js 24 بشكل أصلي (GitHub بيوقف دعم Node 20
+# نهائيًا على الـ runners)، فالتحذير هيختفي من اللوج.
 
 name: Create and Publish Horror Episode
 
@@ -35,14 +40,14 @@ jobs:
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           # لازم fetch-depth: 0 (مش الافتراضي 1) عشان نقدر نعمل
           # git pull --rebase بأمان في آخر خطوة من غير مشاكل shallow clone.
           fetch-depth: 0
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -86,7 +91,7 @@ jobs:
         run: python scripts/publish_buffer.py
 
       - name: Upload video as artifact (for your own records)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: published-video
           path: output/final_video*.mp4
