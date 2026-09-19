@@ -2,7 +2,20 @@
 publish_buffer.py - نشر فيديو (أو فيديوهين لو القصة اتقسمت جزئين) إلى قنوات
 Buffer مع عنوان وهاشتاجات، مع جدولة تلقائية للجزء الثاني.
 
-=== إصلاح جديد مهم (سبب مشكلة تضارب المواعيد بين المنصات) ===
+=== تعديل جديد: لينك الجزء الأول جوه الجزء الثاني ===
+بعد ما الجزء الأول ينشر فعليًا (مش بس يتجدول)، Buffer بيرجّع externalLink
+(الرابط الحقيقي عند المنصة نفسها). بننتظره (polling، حد أقصى
+LINK_WAIT_TIMEOUT_SECONDS ثانية، افتراضيًا 6 دقايق) وبعدين بنحطه في:
+  - يوتيوب: جوه نص وصف فيديو الجزء الثاني نفسه (قابل للضغط عليه).
+  - فيسبوك: كأول تعليق على بوست الجزء الثاني (firstComment، مدعوم رسميًا
+    من Buffer API).
+انستجرام مُستبعد عن قصد: حقل firstComment بتاعها فيها bug معروف ومُعلن
+من Buffer نفسها (بيترفض بصمت)، وحتى لو اشتغل، انستجرام أصلاً مابيخليش
+لينكات قابلة للضغط في الكابشن ولا التعليقات (بس في البايو/الستيكرز).
+لو اللينك اتأخر أكتر من المهلة أو النشر فشل، الجزء الثاني بينشر عادي من
+غير لينك لتلك القناة بس (مش هيوقف السكريبت كله).
+
+=== إصلاح سابق (سبب مشكلة تضارب المواعيد بين المنصات) ===
 
 المشكلة اللي كانت بتحصل: الجزء الأول كان بينشر بـ mode: addToQueue، وده
 حسب توثيق Buffer الرسمي معناه "حطّه في أقرب سلوت فاضي في جدول القناة"،
@@ -39,6 +52,7 @@ import json
 import os
 import re
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -61,6 +75,33 @@ SCHEDULE_LIMIT_MARKER = "Scheduled posts limit"
 
 CHANNEL_PENDING_LIMIT = int(os.environ.get("CHANNEL_PENDING_LIMIT", "10"))
 ENABLE_PREFLIGHT_CHECK = os.environ.get("ENABLE_PREFLIGHT_CHECK", "true").lower() != "false"
+
+# === تعديل جديد: لينك الجزء الأول جوه الجزء الثاني ===
+# بعد نشر الجزء الأول، بنستنى Buffer يرجّع externalLink الحقيقي بتاعه
+# (رابط الفيديو/البوست الفعلي عند المنصة نفسها — مش متاح غير بعد ما
+# البوست يتنشر فعليًا مش بس يتجدول)، وبعدين بنحطه في:
+#   - يوتيوب: نص وصف الفيديو (نفس متغيّر النص العادي بيتحط في description)
+#   - فيسبوك: أول تعليق (firstComment) — مدعوم رسميًا من Buffer.
+# انستجرام مُستبعد عن قصد: حقل firstComment بتاعها فيه bug معروف من
+# Buffer نفسها (بيترفض بصمت)، وحتى لو اشتغل، انستجرام أصلاً مابيخليش
+# لينكات قابلة للضغط في الكابشن ولا التعليقات (بس في البايو/الستيكرز).
+LINKABLE_SERVICES = {"facebook", "youtube"}
+
+# أقصى وقت (بالثانية) بنستناه بعد نشر الجزء الأول لحد ما نجيب الينك
+# الحقيقي بتاعه، قبل ما نكمل وننشئ بوست الجزء الثاني من غيره. يوتيوب
+# ممكن ياخد وقت أطول من فيسبوك بسبب معالجة الفيديو بعد الرفع.
+LINK_WAIT_TIMEOUT_SECONDS = int(os.environ.get("LINK_WAIT_TIMEOUT_SECONDS", "360"))
+LINK_WAIT_POLL_INTERVAL_SECONDS = int(os.environ.get("LINK_WAIT_POLL_INTERVAL_SECONDS", "15"))
+
+GET_POST_STATUS_QUERY = """
+query GetPostStatus($postId: PostId!) {
+  post(id: $postId) {
+    id
+    status
+    externalLink
+  }
+}
+"""
 
 GET_ORGANIZATIONS_QUERY = """
 query GetOrganizations {
@@ -208,7 +249,7 @@ def upload_media(video_path: Path, token: str) -> str:
     return response.json()["browser_download_url"]
 
 
-def metadata_for(channel_id: str, title: str) -> dict | None:
+def metadata_for(channel_id: str, title: str, first_comment: str | None = None) -> dict | None:
     service = CHANNEL_SERVICES.get(channel_id)
     if service == "youtube":
         return {"youtube": {
@@ -220,7 +261,13 @@ def metadata_for(channel_id: str, title: str) -> dict | None:
             "isAiGenerated": True,
         }}
     if service == "facebook":
-        return {"facebook": {"type": "reel"}}
+        # firstComment مدعوم فعليًا من Buffer لفيسبوك (بعكس انستجرام اللي
+        # فيها bug معروف). بيُستخدم هنا لحط لينك الجزء الأول كأول تعليق
+        # على بوست الجزء الثاني.
+        facebook_metadata: dict = {"type": "reel"}
+        if first_comment:
+            facebook_metadata["firstComment"] = first_comment
+        return {"facebook": facebook_metadata}
     if service == "instagram":
         return {"instagram": {"type": "reel", "shouldShareToFeed": True}}
     return None
@@ -247,15 +294,16 @@ def _send_create_post(query: str, variables: dict, api_key: str) -> dict:
 
 def create_buffer_post(
     video_url: str, post_text: str, title: str, channel_id: str,
-    api_key: str, due_at: str,
+    api_key: str, due_at: str, first_comment: str | None = None,
 ) -> dict:
     """
-    ملحوظة: due_at بقى إلزامي دلوقتي (مش Optional زي الأول). كل الأجزاء
-    (الأول والتاني) بتتنشر بـ customScheduled بوقت محدد صراحةً، عشان كل
-    القنوات تنشر في نفس اللحظة بالظبط بدل ما تعتمد على جدول Buffer
-    الداخلي الخاص بكل قناة (وهو ده اللي كان بيسبب تضارب المواعيد).
+    due_at إلزامي دلوقتي (مش Optional). كل الأجزاء (الأول والتاني) بتتنشر
+    بـ customScheduled بوقت محدد صراحةً، عشان كل القنوات تنشر في نفس
+    اللحظة بالظبط بدل ما تعتمد على جدول Buffer الداخلي الخاص بكل قناة.
+    first_comment (اختياري): بيتحط كأول تعليق — مدعوم فعليًا لفيسبوك بس
+    (شوف metadata_for).
     """
-    metadata = metadata_for(channel_id, title)
+    metadata = metadata_for(channel_id, title, first_comment=first_comment)
 
     variables = {
         "text": post_text, "channelId": channel_id, "videoUrl": video_url,
@@ -306,6 +354,61 @@ def _send_graphql(query: str, variables: dict, api_key: str) -> dict:
     if data.get("errors"):
         raise RuntimeError(str(data["errors"]))
     return data.get("data", {})
+
+
+def get_post_external_link(post_id: str, api_key: str) -> tuple[str, str | None]:
+    """يرجّع (status, externalLink) لبوست معيّن. externalLink بيفضل None
+    لحد ما البوست ينشر فعليًا عند المنصة (مش بس يتجدول عند Buffer)."""
+    result = _send_graphql(GET_POST_STATUS_QUERY, {"postId": post_id}, api_key)
+    post = result.get("post") or {}
+    return str(post.get("status", "")).lower(), post.get("externalLink")
+
+
+def wait_for_external_links(post_ids_by_channel: dict[str, str], api_key: str) -> dict[str, str | None]:
+    """
+    بتستنى لحد LINK_WAIT_TIMEOUT_SECONDS ثانية لحد ما تجيب externalLink
+    الحقيقي لكل قناة من قنوات LINKABLE_SERVICES اللي نشرنا فيها الجزء
+    الأول. أي قناة يتأخر أو يفشل نشرها الفعلي (تايم آوت، أو status
+    error/failed) بترجع None ليها بدل ما توقف السكريبت كله — الجزء
+    الثاني هينشر من غير لينك لتلك القناة بس، مش هيفشل بالكامل.
+    """
+    pending = dict(post_ids_by_channel)
+    links: dict[str, str | None] = {channel_id: None for channel_id in pending}
+    if not pending:
+        return links
+
+    deadline = time.monotonic() + LINK_WAIT_TIMEOUT_SECONDS
+    print(f"⏳ بستنى لينكات الجزء الأول الحقيقية لـ {len(pending)} قناة (حد أقصى {LINK_WAIT_TIMEOUT_SECONDS}s)...")
+
+    while pending and time.monotonic() < deadline:
+        for channel_id in list(pending.keys()):
+            post_id = pending[channel_id]
+            service = CHANNEL_SERVICES.get(channel_id, "unknown")
+            try:
+                status, external_link = get_post_external_link(post_id, api_key)
+            except Exception as error:
+                print(f"  ⚠️ تعذّر فحص حالة بوست الجزء الأول لقناة {service}: {error}")
+                continue
+
+            if external_link:
+                links[channel_id] = external_link
+                print(f"  ✅ لينك الجزء الأول جاهز لـ {service}: {external_link}")
+                del pending[channel_id]
+            elif status in ("error", "failed"):
+                print(f"  ❌ بوست الجزء الأول فشل عند Buffer لقناة {service} (status={status}) — مفيش لينك هيتاخد.")
+                del pending[channel_id]
+
+        if pending:
+            time.sleep(LINK_WAIT_POLL_INTERVAL_SECONDS)
+
+    for channel_id in pending:
+        service = CHANNEL_SERVICES.get(channel_id, "unknown")
+        print(
+            f"  ⚠️ اتخطى وقت الانتظار ({LINK_WAIT_TIMEOUT_SECONDS}s) قبل ما نجيب لينك "
+            f"الجزء الأول لقناة {service} — الجزء الثاني هيتنشر من غيره."
+        )
+
+    return links
 
 
 def parse_channel_ids(raw: str) -> list[str]:
@@ -443,6 +546,12 @@ def main() -> None:
     overall_successes = 0
     overall_failures = []
 
+    # هتتملى بـ {channel_id: buffer_post_id} لقنوات LINKABLE_SERVICES بس،
+    # بعد نشر الجزء الأول. بعدين wait_for_external_links() بتحوّلها لـ
+    # {channel_id: الرابط الحقيقي أو None}.
+    part1_post_ids: dict[str, str] = {}
+    part1_links: dict[str, str | None] = {}
+
     for part in parts:
         index, total = part["index"], part["total"]
         part_title, part_caption = augment_for_part(title, caption, index, total)
@@ -465,6 +574,22 @@ def main() -> None:
         for number, channel_id in enumerate(channel_ids, 1):
             service = CHANNEL_SERVICES.get(channel_id, "unknown")
 
+            # === تعديل جديد: حقن لينك الجزء الأول جوه الجزء الثاني ===
+            # يوتيوب: اللينك بيتحط في نص الوصف نفسه (channel_post_text).
+            # فيسبوك: اللينك بيتحط كأول تعليق (first_comment)، مش في النص.
+            # أي قناة تانية (انستجرام مثلاً) تفضل زي ما هي من غير لينك.
+            channel_post_text = post_text
+            first_comment = None
+            if index == 2 and service in LINKABLE_SERVICES:
+                part1_link = part1_links.get(channel_id)
+                if part1_link:
+                    if service == "youtube":
+                        channel_post_text = f"{post_text}\n\n🔗 شاهد الجزء الأول من هنا: {part1_link}"
+                    elif service == "facebook":
+                        first_comment = f"🔗 رابط الجزء الأول: {part1_link}"
+                else:
+                    print(f"  ℹ️ مفيش لينك جزء أول متاح لقناة {service} — الجزء الثاني هيتنشر من غيره.")
+
             if organization_id:
                 try:
                     pending = count_pending_posts(organization_id, channel_id, api_key)
@@ -483,13 +608,22 @@ def main() -> None:
             try:
                 print(f"  Publishing channel {number}/{len(channel_ids)} ({service})...")
                 result = create_buffer_post(
-                    video_url, post_text, part_title, channel_id, api_key, due_at=due_at,
+                    video_url, channel_post_text, part_title, channel_id, api_key,
+                    due_at=due_at, first_comment=first_comment,
                 )
-                print(f"  Published {service}; post id: {result['post'].get('id', 'unknown')}")
+                post_id = result.get("post", {}).get("id", "unknown")
+                print(f"  Published {service}; post id: {post_id}")
                 overall_successes += 1
+                if index == 1 and service in LINKABLE_SERVICES and post_id != "unknown":
+                    part1_post_ids[channel_id] = post_id
             except Exception as error:
                 overall_failures.append((f"part{index}/{service}", str(error)))
                 print(f"  Channel {number}/{len(channel_ids)} failed ({service}): {error}")
+
+        # بعد ما ننشر الجزء الأول لكل القنوات، نستنى اللينكات الحقيقية
+        # بتاعته قبل ما نبدأ نجهّز الجزء الثاني (لو هيكون فيه جزء ثاني).
+        if index == 1 and total > 1:
+            part1_links = wait_for_external_links(part1_post_ids, api_key)
 
     total_attempts = len(parts) * len(channel_ids)
     print(f"Successful Buffer posts: {overall_successes}/{total_attempts}")
