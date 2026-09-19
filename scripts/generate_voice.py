@@ -4,17 +4,26 @@ generate_voice.py
 يحوّل narration إلى صوت عربي باستخدام edge-tts، مع دعم:
 1) نص التوليّد الأساسي (والترجمة/الكابشن) بدون أي تشكيل تمامًا — عشان
    الرسم على الشاشة ميحصل فيه مشاكل (تفكك حروف/رموز غريبة).
-2) *جديد*: تشكيل خفيف جداً يُضاف فقط للكلمات الصعبة النطق (من قاموس صغير
-   قابل للتوسعة تحت)، ويُستخدم فقط في النص المُرسل لمحرك الصوت (TTS)
-   عشان يحسّن نُطق edge-tts لهذه الكلمات بالذات — بينما الترجمة (SRT)
-   والكابشن يفضلوا تمامًا بدون تشكيل زي ما طلبت، لأن التشكيل ده مالوش
-   لازمة بصرية وبيسبب مشاكل رسم.
+2) تشكيل خفيف جداً يُضاف فقط للكلمات الصعبة النطق (من قاموس صغير قابل
+   للتوسعة تحت)، ويُستخدم فقط في النص المُرسل لمحرك الصوت (TTS) عشان
+   يحسّن نُطق edge-tts لهذه الكلمات بالذات — بينما الترجمة (SRT) والكابشن
+   يفضلوا تمامًا بدون تشكيل زي ما طلبت.
 3) ترجمة SRT متزامنة مع توقيت الكلمات.
 4) خلط موسيقى الرعب داخل ملف صوت واحد بنسبة 15%.
 5) نهاية "هوك" قوية ومتنوعة تضمن اكتمال القصة بشكل شيّق ومناسب للترند.
-6) تقسيم تلقائي للقصة إلى جزئين (ريلز) بحد أقصى 90 ثانية (دقيقة ونصف)
-   لكل جزء عشان يصلح لريلز فيسبوك/انستجرام، مع تنويه واضح في نهاية الجزء
-   الأول (كليف هانجر) وبداية الجزء الثاني (استكمال).
+6) === تعديل جديد مهم: التقسيم لجزئين بقى إلزاميًا دايمًا ===
+   كان فيه شرط قديم: لو مدة القصة المقدّرة ≤ 80 ثانية، ترجع القصة كريلز
+   واحد بس من غير تقسيم. ده كان بيكسر افتراض أساسي في publish_buffer.py
+   (اللي مبني على وجود جزئين دايمًا: الجزء الأول ينشر الساعة 3 عصرًا،
+   والجزء الثاني الساعة 7 مساءً على Buffer) — لو رجعت القصة جزء واحد بس،
+   مفيش نشر مسائي أصلاً لتلك الحلقة، وده مخالف للمطلوب.
+   دلوقتي كل قصة (طالما فيها جملتين على الأقل) بتتقسم لجزئين دايمًا، بغض
+   النظر عن مدتها المقدّرة. الاستثناء الوحيد المتبقي: قصة من جملة واحدة
+   بس (حالة نادرة جدًا/خطأ توليد) — مينفعش تتقسم منطقيًا فبترجع كريلز
+   واحد استثنائيًا مع تحذير واضح في اللوج.
+   كمان أُضيف تحذير مبكر لو مدة أي جزء بعد التقسيم قريبة من/متجاوزة حد
+   الـ 90 ثانية الصلب المطبّق لاحقًا في assemble_video.py، عشان تعرف من
+   اللوج إن فيه قص هيحصل في الفيديو النهائي بدل ما تكتشفه بالصدفة.
 7) سكتات حقيقية بين الجمل أثناء الرواية (مش مجرد فاصلة في النص) لتحقيق
    إحساس رعب وتشويق فعلي، بمدد مختلفة حسب نوع نهاية الجملة (نقطة/سؤال/تعجب/...).
 
@@ -23,15 +32,15 @@ generate_voice.py
 في prompts/horror_system_prompt.md)، مش في هذا الملف — هذا الملف بياخد
 narration جاهز ويحوّله لصوت فقط.
 
-الملفات الناتجة (لو القصة اتعملت في ريلز واحد):
-- downloaded_clips/narration_voice.mp3
-- downloaded_clips/narration_with_music.mp3
-- downloaded_clips/narration.ass
-
-الملفات الناتجة (لو القصة اتقسمت جزئين):
+الملفات الناتجة (الوضع الطبيعي: القصة مقسّمة لجزئين دايمًا):
 - downloaded_clips/narration_voice_part1.mp3 / narration_voice_part2.mp3
 - downloaded_clips/narration_with_music_part1.mp3 / narration_with_music_part2.mp3
 - downloaded_clips/narration_part1.ass / narration_part2.ass
+
+الملفات الناتجة (استثناء نادر: قصة جملة واحدة بس، مينفعش تتقسم):
+- downloaded_clips/narration_voice.mp3
+- downloaded_clips/narration_with_music.mp3
+- downloaded_clips/narration.ass
 
 الموسيقى المطلوبة:
 - assets/background_music.mp3
@@ -70,10 +79,14 @@ WORDS_PER_CAPTION_CHUNK = 4
 
 AVG_WORDS_PER_SECOND = 2.1
 
-# أقصى مدة مقترحة للريلز الواحد (بالثانية) قبل ما نلجأ للتقسيم لجزئين.
-# ريلز فيسبوك/انستجرام أقصاه دقيقة ونصف (90 ثانية) — بنستخدم 80 هنا كهامش
-# أمان، والحد الفاصل النهائي (الصلب) موجود في assemble_video.py أيضاً.
-MAX_SINGLE_REEL_SECONDS = 80
+# الحد الأقصى الصلب لكل جزء (بالثانية)، نفس القيمة المطبّقة فعليًا في
+# assemble_video.py (MAX_DURATION_SECONDS). بيُستخدم هنا بس كتحذير مبكر
+# في اللوج لو جزء بعد التقسيم قريب من تجاوز الحد ده، مش لتحديد هل نقسّم
+# أصلاً ولا لأ (التقسيم بقى إلزاميًا دايمًا بغض النظر عن المدة).
+HARD_PART_LIMIT_SECONDS = 90
+# هامش أمان تحذيري (أقل من الحد الصلب) عشان تاخد بالك قبل ما يوصل للقص
+# الفعلي في assemble_video.py.
+WARN_PART_SECONDS = 80
 
 # سكتات حقيقية بين الجمل
 PAUSE_AFTER_ELLIPSIS = 1.3
@@ -109,12 +122,6 @@ SUBTITLES = CLIPS_DIR / "narration.ass"
 VIDEO_W = 1080
 VIDEO_H = 1920
 
-# الستايل ده منقول حرفيًا من ملف main.py اللي بعته (نفس الأرقام بالظبط):
-#   Fontsize=64   -> واضح على دقة 1080×1920 من غير ما يطغى على الشاشة
-#   Outline=3     -> حدّ أسود واضح حوالين النص الأبيض
-#   Alignment=8   -> أعلى-منتصف (7/8/9 = الصف العلوي، 8 = وسط أفقي)
-#   MarginL/R=60  -> متساويين عشان Alignment=8 يتمركز فعليًا في نص الفريم
-#   MarginV=260   -> المسافة من أعلى الفريم (بكسل حقيقي)، تحت نوتش الكاميرا
 SUBTITLE_STYLE_LINE = (
     "Style: Caption,Arial,64,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,"
     "1,0,0,0,100,100,0,0,1,3,0,8,60,60,260,1"
@@ -133,7 +140,6 @@ def run(command: list[str]):
     return result
 
 
-# حركات التشكيل العربي (فتحة/ضمة/كسرة/سكون/شدة/تنوين...) في نطاق يونيكود.
 ARABIC_DIACRITICS_PATTERN = re.compile(
     r"[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED\u08D3-\u08E1\u08E3-\u08FF]"
 )
@@ -144,23 +150,10 @@ def strip_diacritics(text: str) -> str:
 
 
 def normalize_text(text: str) -> str:
-    """
-    بدون أي تشكيل مضاف أو موجود على الإطلاق. يُستخدم لبناء النص "النظيف"
-    الأساسي (اللي منه بنبني الترجمة/الكابشن)، وأي تشكيل خفيف للنطق
-    بيتضاف بعد كده فقط على نسخة منفصلة خاصة بالصوت (انظر
-    apply_light_diacritics تحت).
-    """
     text = strip_diacritics(text)
     return re.sub(r"\s+", " ", text).strip()
 
 
-# ---------------------------------------------------------------------------
-# تشكيل خفيف لكلمات صعبة النطق (خاص بالصوت فقط، مش بالترجمة/الكابشن)
-# ---------------------------------------------------------------------------
-# قاموس صغير قابل للتوسعة: المفتاح هو الكلمة بدون تشكيل (لازم تطابق شكل
-# الكلمة في النص بعد normalize_text تمامًا)، والقيمة هي نفس الكلمة
-# بتشكيل جزئي يوضّح النطق الصحيح فقط عند الالتباس (مش تشكيل كامل).
-# وسّع القاموس ده بأي كلمة لاحظت إن edge-tts بينطقها غلط في حلقاتك.
 HARD_WORDS_DIACRITICS: dict[str, str] = {
     "عدة": "عِدّة",
     "قلبه": "قَلْبه",
@@ -178,12 +171,6 @@ _WORD_TOKEN_PATTERN = re.compile(r"[\w\u0600-\u06FF]+", re.UNICODE)
 
 
 def apply_light_diacritics(text: str) -> str:
-    """
-    يرجّع نسخة من النص (المفروض تكون داخلة نظيفة بدون تشكيل) بعد إضافة
-    تشكيل خفيف فقط للكلمات الموجودة في HARD_WORDS_DIACRITICS، مع الحفاظ
-    على باقي النص وعلامات الترقيم كما هي. تُستخدم هذه النسخة في توليد
-    الصوت فقط (TTS)، ولا تُستخدم أبدًا في بناء الترجمة أو الكابشن.
-    """
     def replace(match: re.Match) -> str:
         word = match.group(0)
         return HARD_WORDS_DIACRITICS.get(word, word)
@@ -192,7 +179,6 @@ def apply_light_diacritics(text: str) -> str:
 
 
 def ass_time(seconds: float) -> str:
-    """H:MM:SS.cc — صيغة توقيت ASS (سنتي ثانية مش ميلي ثانية زي SRT)."""
     centiseconds = max(0, int(round(seconds * 100)))
     hours, remainder = divmod(centiseconds, 360_000)
     minutes, remainder = divmod(remainder, 6_000)
@@ -222,15 +208,10 @@ def build_ass_header() -> str:
     )
 
 
-RTL_MARK = "\u200F"  # Right-to-Left Mark: يفرض ترتيب الكلمات العربية صح
+RTL_MARK = "\u200F"
 
 
 def two_lines(words: list[str]) -> str:
-    """
-    يقسّم مجموعة الكلمات على سطرين متوازنين قدر الإمكان. نضيف RTL_MARK
-    في أول كل سطر عشان نضمن إن libass يرتّب الكلمات العربية من اليمين
-    لليسار صح، حتى لو حصل التباس بسبب أرقام أو علامات ترقيم لاتينية.
-    """
     words = [word.strip() for word in words if word.strip()]
     if not words:
         return ""
@@ -258,29 +239,50 @@ def pause_duration_for(sentence: str) -> float:
     return DEFAULT_PAUSE
 
 
+def _estimated_seconds(text: str) -> float:
+    return len(text.split()) / AVG_WORDS_PER_SECOND
+
+
+def _warn_if_too_long(label: str, text: str) -> None:
+    """تحذير مبكر فقط — القص الفعلي (لو حصل) بيحصل في assemble_video.py."""
+    estimated = _estimated_seconds(text)
+    if estimated >= HARD_PART_LIMIT_SECONDS:
+        print(
+            f"❌ {label}: المدة المقدّرة {estimated:.0f} ثانية ≥ الحد الصلب "
+            f"{HARD_PART_LIMIT_SECONDS}s — هيحصل قص فعلي في نهاية الفيديو "
+            f"في assemble_video.py. قلّل TARGET_WORDS في generate_script.py."
+        )
+    elif estimated >= WARN_PART_SECONDS:
+        print(
+            f"⚠️ {label}: المدة المقدّرة {estimated:.0f} ثانية قريبة من الحد "
+            f"الصلب {HARD_PART_LIMIT_SECONDS}s — مفيش هامش أمان كبير."
+        )
+
+
 def build_final_narration(raw_narration: str) -> list[str]:
     """
-    يجهز نص/نصوص القصة النهائية (نسخة نظيفة بدون تشكيل):
-    - لو القصة قصيرة بما يكفي لريلز واحد (≤ MAX_SINGLE_REEL_SECONDS)
-      -> يرجّع عنصر واحد بس، ينتهي بهوك قوي.
-    - لو القصة طويلة -> يرجّع عنصرين، كل واحد منهم بحجم يقارب نصف القصة
-      عشان يفضل الجزء الواحد جوه حد الـ 90 ثانية بتاع الريلز.
+    يجهز نصوص القصة النهائية (نسخة نظيفة بدون تشكيل)، مقسّمة دائمًا إلى
+    جزأين (ريلين)، بغض النظر عن مدة القصة المقدّرة — التقسيم لجزء واحد بس
+    بقى استثناء نادر جدًا (قصة من جملة واحدة بس، مينفعش تتقسم منطقيًا).
     """
     text = raw_narration.strip()
     if not text.endswith((".", "؟", "!", "…")):
         text += "."
 
     sentences = split_sentences(text)
-    total_words = sum(len(sentence.split()) for sentence in sentences)
-    estimated_seconds = total_words / AVG_WORDS_PER_SECOND
-
     hook = random.choice(HOOK_ENDINGS)
 
-    if estimated_seconds <= MAX_SINGLE_REEL_SECONDS or len(sentences) <= 1:
+    if len(sentences) <= 1:
+        print(
+            "⚠️ narration جملة واحدة بس — تعذّر تقسيمها لجزئين منطقيًا، "
+            "هيتعمل ريلز واحد استثنائيًا (تحقق من جودة توليد generate_script.py)."
+        )
         if hook not in text:
             text = f"{text} {hook}"
+        _warn_if_too_long("الريلز الوحيد", text)
         return [text]
 
+    total_words = sum(len(sentence.split()) for sentence in sentences)
     half_words = total_words / 2
     cumulative = 0
     split_index = len(sentences) - 1
@@ -290,19 +292,21 @@ def build_final_narration(raw_narration: str) -> list[str]:
             split_index = index
             break
 
+    # نضمن إن كل جزء فيه جملة واحدة على الأقل (مفيش جزء فاضي)، حتى لو
+    # نقطة المنتصف بالكلمات وقعت في آخر جملة.
+    split_index = min(max(split_index, 0), len(sentences) - 2)
+
     part_one_sentences = sentences[: split_index + 1]
     part_two_sentences = sentences[split_index + 1:]
-
-    if not part_one_sentences or not part_two_sentences:
-        if hook not in text:
-            text = f"{text} {hook}"
-        return [text]
 
     part_one = " ".join(part_one_sentences) + " " + PART_ONE_CLIFFHANGER
     part_two_body = " ".join(part_two_sentences)
     if hook not in part_two_body:
         part_two_body = f"{part_two_body} {hook}"
     part_two = f"{PART_TWO_INTRO} {part_two_body}"
+
+    _warn_if_too_long("الجزء الأول", part_one)
+    _warn_if_too_long("الجزء الثاني", part_two)
 
     return [part_one, part_two]
 
@@ -328,11 +332,6 @@ def build_silence_clip(duration: float, path: Path):
 
 
 async def synthesize_sentences(sentences: list[str], work_prefix: str) -> list[dict]:
-    """
-    كل جملة هنا مفروض تكون داخلة ومعاها التشكيل الخفيف (لو الكلمة موجودة
-    في القاموس) — ده اللي بيتبعت فعليًا لـ edge-tts. الترجمة بعدين بتشيل
-    أي تشكيل من نص الأحداث (WordBoundary) قبل ما تظهر على الشاشة.
-    """
     segments = []
     for index, sentence in enumerate(sentences):
         seg_path = CLIPS_DIR / f"_seg_{work_prefix}_{index:03d}.mp3"
@@ -372,12 +371,6 @@ async def synthesize_sentences(sentences: list[str], work_prefix: str) -> list[d
 
 
 def synthesize_voice(voice_text: str, voice_audio: Path, subtitles: Path, work_prefix: str):
-    """
-    voice_text: النص المُرسل فعليًا للصوت — قد يحتوي تشكيلًا خفيفًا على
-    كلمات صعبة (من apply_light_diacritics). الترجمة الناتجة (subtitles)
-    بتُبنى دايمًا من نص الأحداث بعد تجريده من أي تشكيل (strip_diacritics)،
-    فتفضل الترجمة نظيفة 100% زي ما طلبت.
-    """
     sentences = split_sentences(voice_text)
     if not sentences:
         sys.exit("❌ النص فارغ ولا يمكن إنشاء صوت.")
@@ -411,7 +404,6 @@ def synthesize_voice(voice_text: str, voice_audio: Path, subtitles: Path, work_p
                 all_word_events.append({
                     "offset": event["offset"] + int(cumulative_seconds * 10_000_000),
                     "duration": event["duration"],
-                    # نجرّد التشكيل الخفيف فورًا هنا عشان الترجمة تفضل نظيفة.
                     "text": strip_diacritics(event["text"]),
                 })
         else:
@@ -477,8 +469,6 @@ def mix_music_into_voice(voice_audio: Path, final_audio: Path):
 
 
 def process_part(clean_text: str, suffix: str) -> dict:
-    """clean_text: النص بدون أي تشكيل (المصدر الوحيد للحقيقة). يُبنى منه
-    voice_text (بتشكيل خفيف لكلمات صعبة) فقط للاستخدام الداخلي في TTS."""
     voice_audio = CLIPS_DIR / f"narration_voice{suffix}.mp3"
     final_audio = CLIPS_DIR / f"narration_with_music{suffix}.mp3"
     subtitles = CLIPS_DIR / f"narration{suffix}.ass"
@@ -511,6 +501,8 @@ def main():
     parts_text = [normalize_text(part) for part in parts_text]
 
     if len(parts_text) == 1:
+        # استثناء نادر جدًا فقط (narration جملة واحدة بس) — شوف التحذير
+        # اللي طبع فوق في build_final_narration.
         result = process_part(parts_text[0], suffix="")
         episode["narration"] = parts_text[0]
         episode["parts"] = [result]
@@ -525,7 +517,7 @@ def main():
             print(f"✅ الجزء {index}: {result['final_audio']}")
         episode["narration"] = "\n\n---\n\n".join(parts_text)
         episode["parts"] = results
-        print("⚠️ القصة طويلة عن حد الريلز الواحد (90 ثانية)، تم تقسيمها إلى جزئين")
+        print("✅ القصة مقسّمة إلى جزئين (كل حلقة دايمًا جزئين، مش شرطي).")
         print("✅ تم إضافة تنويه استكمال في نهاية الجزء الأول وبداية الجزء الثاني.")
 
     EPISODE_PATH.write_text(
