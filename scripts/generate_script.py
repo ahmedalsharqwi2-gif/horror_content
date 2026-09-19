@@ -2,45 +2,40 @@
 generate_script.py
 يستدعي Groq API عشان يولّد سيناريو القصة + كلمات البحث البصرية.
 
-=== تعديل جديد (نسخة الفصحى) ===
-أُضيف تنويه صريح في رسالة المستخدم يطلب من الموديل الكتابة باللغة العربية
-الفصحى المبسّطة (لا العامية المصرية أو أي لهجة محلية)، عشان الفيديو يكون
-مفهوماً لكل الجمهور العربي بمختلف لهجاته. لو عايز الالتزام يكون أقوى،
-لازم كمان تعدّل ملف prompts/horror_system_prompt.md (اللي مش موجود عندي
-هنا) وتضيف فيه نفس التوجيه بشكل صريح كجزء من الـ system prompt، لأن
-الموديل بيتقيّد بيه أكتر من رسالة المستخدم.
+=== تعديل جديد (قصص حقيقية + هوك + كلمات بحث دقيقة + تنويع جغرافي) ===
 
-=== تعديلات نسخة "توفير التوكن" (سابقة) ===
+1) القصص بقت مطلوب منها تكون مبنية على حالات حقيقية/موثقة أو أساطير
+   حضرية مشهورة يُتداول إنها حقيقية (اختفاءات غامضة، قضايا غير محلولة،
+   أماكن مسكونة موثّقة إعلاميًا...)، بدل التأليف الكامل من الصفر.
+   ⚠️ تنويه مهم وصادق: الموديل مايقدرش "يتحقق" فعليًا من صحة أي حدث —
+   مفيش أداة بحث جوه السكريبت. اللي بيحصل هو توجيه الموديل لاستخدام
+   معرفته بقضايا/أساطير مشهورة فعلاً (زي أسلوب "مبنية على أحداث حقيقية"
+   الشائع في محتوى الرعب)، مش تحقق واقعي مضمون 100%. لو عايز تحقق حقيقي،
+   محتاج تضيف خطوة بحث ويب فعلية قبل التوليد (مش موجودة حاليًا).
 
-1) الموديل: llama-3.3-70b-versatile اتشال من الخطة المجانية/Developer
-   (بقى Enterprise/Contact Sales) → 404. البديل: openai/gpt-oss-120b.
+2) أُضيف حقل جديد إلزامي "hook" في الـ schema: جملة واحدة قوية وصادمة
+   تُستخدم كأول سطر يظهر في الفيديو (قبل أو مع بداية narration) عشان
+   تمسك المشاهد في أول ثانيتين. الموديل مطلوب منه يكتبها منفصلة، وبرضو
+   يبدأ بيها (أو بصياغة قريبة منها) أول narration.
 
-2) reasoning_effort="low"  ← أهم تغيير في الملف كله.
-   موديلات GPT-OSS موديلات تفكير: بتحرق توكنز في التفكير قبل ما تكتب حرف
-   من القصة، والافتراضي عند جروك هو "medium". من غير السطر ده، نص
-   الميزانية أو أكتر بتتاكل على الفاضي وبعدين الرد يتقطع.
+3) حقل جديد اختياري "region": المنطقة/الدولة اللي القصة منها (مثلاً
+   "اليابان"، "المكسيك"، "بولندا"...). بيتسجل في التاريخ عشان نمنع تكرار
+   نفس المنطقة كل مرة ونضمن تنويع جغرافي حقيقي. الحقل اختياري في القراءة
+   (load_used_history) عشان الكود يفضل شغال حتى لو ملف used_clips.json
+   القديم مفيهوش الحقل ده أصلاً.
 
-3) Structured Outputs (json_schema + strict=True) بدل json_object.
-   الموديل بيتقيّد على مستوى التوكن إنه يطلع JSON مطابق للـ schema.
-   ده بيلغي 3 من أسباب إعادة المحاولة القديمة (JSON غير صالح / حقول ناقصة /
-   visual_keywords فاضية) — يعني مفيش توليد كامل بيتضيع تاني بسببها.
+4) visual_keywords بقت مطلوب منها تكون مشتقة من تفاصيل ملموسة داخل نص
+   القصة نفسها (مكان/عصر/أغراض/شخصيات محددة مذكورة فعلاً)، مش كلمات رعب
+   عامة (زي "spooky forest" أو "scary house") بتجيب لقطات ستوك عشوائية
+   ملهاش علاقة مباشرة بالموضوع.
 
-4) إعادة المحاولة بقت "بتصعّد" الميزانية بدل ما تكرر نفس النداء الفاشل حرفيًا.
-   قبل كده: نفس الموديل + نفس الـ prompt + نفس السقف = نفس الاقتطاع بالظبط،
-   3 مرات. دلوقتي الاقتطاع بيرفع السقف قبل المحاولة الجاية.
+⚠️ لأقوى التزام من الموديل، المفروض تضيف نفس التوجيهات دي (خصوصًا بند
+القصص الحقيقية والهوك) كجزء من prompts/horror_system_prompt.md نفسه،
+لأن الموديل بيتقيّد بالـ system prompt أكتر من رسالة المستخدم. ابعتلي
+محتوى الملف ده لو عايزني أدمج التوجيهات فيه مباشرة.
 
-5) طول القصة اتحدد صراحةً في الـ prompt (TARGET_WORDS) — ده اللي بيتحكم في
-   الاستهلاك الفعلي، مش السقف.
-
-6) HISTORY_LIMIT اتقلل من 15 لـ 8 (العناوين دي بتتبعت في كل نداء).
-
-7) طباعة استهلاك التوكنز بعد كل نداء عشان تشوف الأرقام الحقيقية.
-
-ملحوظة: MAX_COMPLETION_TOKENS سقف مش استهلاك — بتدفع على اللي اتولّد فعلاً بس.
-رفعه مجاني، وبيمنع الاقتطاع اللي بيضيّع نداء كامل.
-
-يحتاج: GROQ_API_KEY في GitHub Secrets.
-اختياري: GROQ_MODEL, GROQ_REASONING_EFFORT كمتغيرات بيئة.
+=== تعديلات سابقة (نسخة الفصحى + توفير التوكن) ===
+[محفوظة كما هي أسفل الكود]
 """
 import os
 import json
@@ -55,31 +50,26 @@ OUTPUT_PATH = SCRIPT_DIR.parent / "state" / "current_episode.json"
 
 # ─────────────────────────── الإعدادات ───────────────────────────
 
-# جرّب "openai/gpt-oss-20b" لو عايز نص التكلفة وضعف السرعة؛ الجودة أقل شوية
-# في السرد العربي الطويل. التغيير من GitHub Secrets من غير ما تلمس الكود.
 MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
-
-# "low" | "medium" | "high" — سيبها low. كتابة قصة رعب مش محتاجة تفكير عميق،
-# ورفعها لـ medium ممكن يضاعف استهلاك المخرجات من غير فايدة تُذكر.
 REASONING_EFFORT = os.getenv("GROQ_REASONING_EFFORT", "low")
-
 TEMPERATURE = 0.85
-
-# سقف مش استهلاك. واسع عن قصد عشان الاقتطاع ميضيعش نداء كامل.
 MAX_COMPLETION_TOKENS = 6000
-
-# الطول المستهدف للقصة — ده المتحكم الحقيقي في الاستهلاك.
-# قلّله لو عايز ريل واحد قصير، زوّده لو عايز تقسيم على ريلزين.
-TARGET_WORDS = int(os.getenv("TARGET_WORDS", "320"))
-
-# محاولتين كفاية دلوقتي: الـ schema الصارم شال معظم أسباب الفشل.
+# اتحسب على أساس إن الحلقة دايمًا بتتقسم لجزئين (زي ما assemble_video.py
+# بيفترض دايمًا: final_video_part1.mp4 + final_video_part2.mp4)، وكل جزء
+# له حد أقصى صلب 90 ثانية (MAX_DURATION_SECONDS في assemble_video.py).
+# بمتوسط سرعة نطق عربي فصيح ~2.3-2.7 كلمة/ثانية:
+#   300 كلمة إجمالي (±15% = 255-345 كلمة) ≈ 94-150 ثانية إجمالي،
+#   يعني تقريبًا 47-75 ثانية للجزء الواحد بعد التقسيم بالنص — مسافة أمان
+#   كويسة تحت حد الـ90 ثانية لكل جزء.
+# لو قللت الرقم ده كتير، الجزء التاني ممكن يبقى قصير جدًا أو شبه فاضي.
+TARGET_WORDS = int(os.getenv("TARGET_WORDS", "300"))
 MAX_ATTEMPTS = 2
-
-# كل عنوان هنا بيتبعت في كل نداء — 8 كفاية لتجنب التكرار.
 HISTORY_LIMIT = 8
-
-# لو الرد اتقطع، اضرب السقف في الرقم ده قبل المحاولة الجاية.
 LENGTH_ESCALATION = 1.5
+
+# آخر N مناطق/دول اتستخدمت — بتتبعت في الـ prompt عشان نضمن تنويع جغرافي
+# ومنمنعش نفس المنطقة تتكرر أكتر من مرة قريبة.
+REGION_HISTORY_LIMIT = 6
 
 # ⚠️ لو السكريبت اللي بيجيب الفيديوهات من Pexels بيتوقع visual_keywords
 # كـ string مفصول بفواصل بدل list، غيّر "type": "array" لـ "type": "string"
@@ -91,12 +81,16 @@ EPISODE_SCHEMA = {
         "type": "object",
         "properties": {
             "title": {"type": "string"},
+            "hook": {"type": "string"},
+            "region": {"type": "string"},
             "narration": {"type": "string"},
             "visual_keywords": {"type": "array", "items": {"type": "string"}},
             "caption": {"type": "string"},
         },
-        # strict mode بيطلب إن كل الحقول تكون في required و additionalProperties=false
-        "required": ["title", "narration", "visual_keywords", "caption"],
+        "required": [
+            "title", "hook", "region", "narration",
+            "visual_keywords", "caption",
+        ],
         "additionalProperties": False,
     },
 }
@@ -122,8 +116,24 @@ def load_used_history(limit: int = HISTORY_LIMIT) -> list[str]:
     return [h.get("title", "") for h in data.get("history", [])][-limit:]
 
 
+def load_used_regions(limit: int = REGION_HISTORY_LIMIT) -> list[str]:
+    """
+    يجيب آخر N مناطق/دول اتستخدمت، عشان نطلب من الموديل يتجنب تكرارها.
+    آمن على ملفات used_clips.json القديمة اللي مفيهاش حقل "region" أصلاً
+    (هيتجاهلها ببساطة من غير ما يفشل).
+    """
+    history_path = SCRIPT_DIR.parent / "state" / "used_clips.json"
+    if not history_path.exists():
+        return []
+    try:
+        data = json.loads(history_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
+    regions = [h.get("region", "") for h in data.get("history", []) if h.get("region")]
+    return regions[-limit:]
+
+
 def looks_truncated(narration: str) -> bool:
-    """فحص بسيط: هل نص القصة شكله متقطوع في نص الكلام؟"""
     stripped = narration.strip()
     if not stripped:
         return True
@@ -131,7 +141,6 @@ def looks_truncated(narration: str) -> bool:
 
 
 def log_usage(completion, attempt: int) -> None:
-    """يطبع الاستهلاك الفعلي عشان تعرف إنت بتدفع على إيه."""
     usage = getattr(completion, "usage", None)
     if not usage:
         return
@@ -143,10 +152,6 @@ def log_usage(completion, attempt: int) -> None:
 
 
 def create_completion(client: Groq, **kwargs):
-    """
-    نداء الموديل مع fallback لو نسخة مكتبة groq المثبتة قديمة ومش عارفة
-    reasoning_effort كـ parameter مباشر.
-    """
     try:
         return client.chat.completions.create(**kwargs)
     except TypeError:
@@ -158,26 +163,46 @@ def create_completion(client: Groq, **kwargs):
 
 # ─────────────────────────── التوليد ───────────────────────────
 
-def build_user_message(recent_titles: list[str]) -> str:
+def build_user_message(recent_titles: list[str], recent_regions: list[str]) -> str:
     message = (
         "اكتب حلقة جديدة تمامًا.\n\n"
         "⚠️ مهم جدًا بخصوص اللغة: اكتب حقل narration بالكامل باللغة العربية "
         "الفصحى المبسّطة (Modern Standard Arabic) فقط. ممنوع استخدام أي "
-        "لهجة عامية أو محلية (مصرية، خليجية، شامية، مغربية...) حتى لو كلمة "
-        "واحدة، عشان النص يكون مفهومًا لكل متابع عربي بغض النظر عن بلده. "
-        "استخدم جملاً فصيحة سليمة نحويًا وواضحة.\n\n"
-        f"الطول المستهدف لحقل narration: حوالي {TARGET_WORDS} كلمة "
-        "(±15%) — لا أقصر ولا أطول بشكل ملحوظ.\n"
-        "لازم القصة تكون مكتملة تمامًا: بداية واضحة، تصاعد حقيقي في الأحداث، "
-        "وخاتمة فعلية تقفل القصة — من غير ما تتقطع في نص الكلام أو تسيب "
-        "حاجة معلقة من غير قصد.\n"
-        "اكتب النص النهائي مباشرة: من غير أي تمهيد، ولا شرح، ولا تعليق على "
-        "القصة قبلها أو بعدها."
+        "لهجة عامية أو محلية حتى لو كلمة واحدة.\n\n"
+        "⚠️ مهم جدًا بخصوص مصدر القصة: لازم تكون القصة مبنية على حادثة "
+        "حقيقية موثّقة، أو قضية غامضة معروفة إعلاميًا، أو أسطورة حضرية "
+        "مشهورة يُتداول على نطاق واسع إنها حقيقية (اختفاء غامض، بيت مسكون "
+        "موثّق، حادثة غير محلولة...). ممنوع اختراع قصة خيالية بالكامل من "
+        "الصفر. لو التفاصيل الدقيقة مش متأكد منها 100%، استخدم صياغة "
+        "شائعة زي 'تقول الروايات إن...' أو 'وفقًا لما تم توثيقه...' بدل "
+        "تقديم تفاصيل مختلقة كحقيقة مؤكدة قطعيًا.\n\n"
+        "⚠️ مهم جدًا بخصوص الهوك: أول جملة في حقل hook لازم تكون صادمة "
+        "ومباشرة وتخلق فضول فوري (سؤال مثير، حقيقة صادمة، أو مشهد لحظة "
+        "الذروة) — الهدف إنها توقف المشاهد عن الاسكرول في أول ثانيتين. "
+        "وبعدين ابدأ narration بنفس الهوك أو صياغة قريبة جدًا منه كأول "
+        "جملة فيه، مش بمقدمة عامة بطيئة.\n\n"
+        "⚠️ مهم جدًا بخصوص visual_keywords: كل كلمة بحث لازم تكون مشتقة "
+        "من تفاصيل ملموسة ومحددة مذكورة فعليًا في narration (المكان "
+        "بالاسم أو الوصف، العصر/الفترة الزمنية، الأغراض أو المشاهد "
+        "المحددة المذكورة في القصة). ممنوع كلمات رعب عامة وفضفاضة زي "
+        "'spooky forest' أو 'scary house' من غير علاقة مباشرة بتفاصيل "
+        "القصة، لأنها بتجيب لقطات ستوك عشوائية ملهاش علاقة بالموضوع.\n\n"
+        "⚠️ التنويع الجغرافي: اختار منطقة/دولة مختلفة عن المناطق اللي "
+        "اتذكرت قبل كده (تحت). حط اسم المنطقة/الدولة في حقل region.\n\n"
+        f"الطول المستهدف لحقل narration: حوالي {TARGET_WORDS} كلمة (±15%).\n"
+        "لازم القصة تكون مكتملة: بداية واضحة (الهوك)، تصاعد حقيقي، وخاتمة "
+        "فعلية تقفل القصة من غير تقطيع.\n"
+        "اكتب النص النهائي مباشرة: من غير أي تمهيد أو شرح أو تعليق."
     )
     if recent_titles:
         message += (
             "\n\nالعناوين اللي اتستخدمت قبل كده (تجنب أي تشابه معاها):\n- "
             + "\n- ".join(recent_titles)
+        )
+    if recent_regions:
+        message += (
+            "\n\nالمناطق/الدول اللي اتستخدمت قبل كده (اختار منطقة مختلفة "
+            "عنها):\n- " + "\n- ".join(recent_regions)
         )
     return message
 
@@ -189,7 +214,7 @@ def generate_episode() -> dict:
 
     client = Groq(api_key=api_key)
     system_prompt = load_system_prompt()
-    user_message = build_user_message(load_used_history())
+    user_message = build_user_message(load_used_history(), load_used_regions())
 
     budget = MAX_COMPLETION_TOKENS
     last_error = "لا يوجد"
@@ -201,8 +226,6 @@ def generate_episode() -> dict:
             client,
             model=MODEL,
             messages=[
-                # السيستم prompt أول رسالة وثابت حرفيًا → بيستفيد من
-                # prompt caching بتاع جروك في المحاولات اللي بعدها.
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message},
             ],
@@ -215,7 +238,6 @@ def generate_episode() -> dict:
         log_usage(completion, attempt)
         choice = completion.choices[0]
 
-        # ── الاقتطاع: صعّد الميزانية، متكررش نفس النداء ──
         if choice.finish_reason == "length":
             budget = int(budget * LENGTH_ESCALATION)
             last_error = "الرد اتقطع بسبب حد التوكنز (finish_reason=length)"
@@ -224,7 +246,6 @@ def generate_episode() -> dict:
 
         raw = choice.message.content or ""
 
-        # الـ schema الصارم بيضمن ده، بس سايبه كشبكة أمان لو الموديل اتغير.
         try:
             episode = json.loads(raw)
         except json.JSONDecodeError as exc:
@@ -237,8 +258,6 @@ def generate_episode() -> dict:
             print(f"⚠️ محاولة {attempt}/{MAX_ATTEMPTS}: {last_error} — هعيد المحاولة...")
             continue
 
-        # ── ده السبب الوحيد الواقعي لإعادة المحاولة دلوقتي ──
-        # الـ schema بيضمن الشكل، مش اكتمال الحبكة.
         narration = str(episode.get("narration", "")).strip()
         if looks_truncated(narration):
             last_error = "نص narration شكله متقطوع (مش منتهي بعلامة ترقيم واضحة)"
@@ -247,6 +266,11 @@ def generate_episode() -> dict:
 
         if not episode.get("visual_keywords"):
             last_error = "حقل visual_keywords فاضي"
+            print(f"⚠️ محاولة {attempt}/{MAX_ATTEMPTS}: {last_error} — هعيد المحاولة...")
+            continue
+
+        if not str(episode.get("hook", "")).strip():
+            last_error = "حقل hook فاضي"
             print(f"⚠️ محاولة {attempt}/{MAX_ATTEMPTS}: {last_error} — هعيد المحاولة...")
             continue
 
@@ -264,4 +288,6 @@ if __name__ == "__main__":
         json.dumps(episode, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     print(f"✅ اتكتبت الحلقة: {episode['title']}")
+    print(f"   المنطقة: {episode.get('region', 'غير محدد')}")
+    print(f"   الهوك: {episode.get('hook', '')[:80]}")
     print(f"   كلمات البحث: {episode['visual_keywords']}")
