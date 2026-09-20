@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+horror_pipeline.log
+
+# Output
+output/
+*.mp4
+*.mov
+*.avi
+*.mkv
+
+# Audio
+*.mp3
+*.wav
+
+# Assets (keep folder, ignore files)
+assets/*
+!assets/.gitkeep
+
+# State
+state/*.json
+!state/.gitkeep
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Sensitive
+*.pem
+*.key
+secrets.json
+config.local.py
